@@ -1,11 +1,7 @@
 # Dependencies
 node_modules/
 
-# Build output
-lib/
-bin/
-
-# Logs / local state
+# Local logs / state
 *.log
 *.tgz
 .pnpm-store/
