@@ -5,5 +5,5 @@
 # Override any option via the config object below (see src/config.ts).
 - insert:
     - id: opencode2dsh
-      name: '@opencode2dsh/dsh-plugin'
+      name: '@jackguo0310/opencode2dsh'
       config: {}

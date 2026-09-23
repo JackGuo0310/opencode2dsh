@@ -8,6 +8,6 @@
     }
   },
   "dependencies": {
-    "@opencode2dsh/dsh-plugin": "^0.3.1"
+    "@jackguo0310/opencode2dsh": "file:packages/plugin"
   }
 }

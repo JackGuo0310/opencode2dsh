@@ -6,10 +6,10 @@
 
 No API key. No registration. No extra process.
 
-[![npm](https://img.shields.io/npm/v/@opencode2dsh%2Fdsh-plugin)](https://www.npmjs.com/package/@opencode2dsh/dsh-plugin)
-[![license](https://img.shields.io/npm/l/@opencode2dsh%2Fdsh-plugin)](https://github.com/FishBottle7/opencode2dsh/blob/master/LICENSE)
+[![npm](https://img.shields.io/npm/v/@opencode2dsh%2Fdsh-plugin)](https://www.npmjs.com/package/@jackguo0310/opencode2dsh)
+[![license](https://img.shields.io/npm/l/@opencode2dsh%2Fdsh-plugin)](https://github.com/JackGuo0310/opencode2dsh/blob/master/LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/FishBottle7/opencode2dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/JackGuo0310/opencode2dsh)
 
 English | [简体中文](README.zh-CN.md)
 
@@ -46,13 +46,13 @@ install.
 **From npm**:
 
 ```sh
-dsh plugin --profile web add @opencode2dsh/dsh-plugin
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.0
 ```
 
 **From source** (build the tarball yourself):
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
+git clone https://github.com/JackGuo0310/opencode2dsh.git
 cd opencode2dsh/packages/plugin
 pnpm install && pnpm pack
 dsh plugin --profile web add ./opencode2dsh-dsh-plugin-<version>.tgz
@@ -70,7 +70,7 @@ Defaults work out of the box. Override via the profile's `cordis.patch.yml`:
 
 ```yaml
 - id: opencode2dsh
-  name: '@opencode2dsh/dsh-plugin'
+  name: '@jackguo0310/opencode2dsh'
   config:
     mode: adapter        # adapter (default) | sidecar
     providerId: opencode2dsh
@@ -155,7 +155,7 @@ The plugin writes a health snapshot after every refresh round:
 ## Development
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
+git clone https://github.com/JackGuo0310/opencode2dsh.git
 cd opencode2dsh/packages/plugin
 pnpm install
 pnpm typecheck && pnpm test   # 44 unit tests

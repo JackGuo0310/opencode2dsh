@@ -19,7 +19,7 @@ import { basename, dirname, resolve as resolvePath, sep } from 'node:path'
 import { transform } from 'lightningcss'
 import type { UserConfig } from 'tsdown'
 
-const ID = '@opencode2dsh/dsh-plugin'
+const ID = '@jackguo0310/opencode2dsh'
 
 /**
  * Browser platform modules the shell seeds into the frozen module table
