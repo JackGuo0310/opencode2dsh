@@ -41,6 +41,12 @@ export async function removeProviderRoute(
   seams: Pick<DshSeams, 'settings'>,
   providerId: string,
 ): Promise<boolean> {
+  // Host versions that drop settings.get/mutate (e.g. DSH 0.1.7-alpha.1)
+  // cannot do this cleanup. Skipping the stale-route removal is safe: the
+  // adapter serves the provider id itself, so a leftover route would at worst
+  // shadow dispatch on the same id — and on those hosts the legacy sidecar
+  // path never ran. (Local-compat guard, baked in from the installed build.)
+  if (typeof seams?.settings?.get !== 'function' || typeof seams?.settings?.mutate !== 'function') return false
   const namespace = seams.settings.get('llm-pi-ai') as { providers?: Record<string, unknown> } | undefined
   if (!namespace?.providers || !(providerId in namespace.providers)) return false
   await seams.settings.mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', providerId] }])

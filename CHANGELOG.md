@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.0 (2026-09-22)
+
+从 FishBottle7/opencode2dsh fork 而来的自维护基线，版权归属切换至
+JackGuo0310/opencode2dsh，版本从 1.0.0 开始独立计数（基于上游 0.3.3）。
+
+### Added / Changed
+
+- 上游 0.3.3 全部能力不变（匿名免费模型、CLI 同形伪装、三级目录回退链、IP 池）。
+- **自维护加固**：`removeProviderRoute` 增加 `settings.get/mutate` 缺失守卫——
+  DSH 0.1.7-alpha.1 起宿主不再提供该接口时跳过旧路由清理，避免启动警告
+  （原为针对 npm 安装的实际 lib 补丁，现已固化进源码，升级不再丢失）。
+- **仓库元数据**更新为 JackGuo0310/opencode2dsh（repository/homepage/bugs/author）。
+- **支持 git 依赖安装**：新增 `prepare` 脚本，`dsh plugin add github:JackGuo0310/opencode2dsh#<tag>`
+  时自动构建主机与客户端 bundle。
+
+### 其他
+
+- 早期提交（上下文窗口修复）见 PR #18：models.dev `limit.context/output` 接入
+  `resolveModel` 与 pi-ai wire model，窗口如实上报、输出上限只降不升。
+
 ## 0.3.3 (2026-09-18)
 
 ### Added
