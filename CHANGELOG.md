@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.1 (2026-09-23)
+
+**仓库结构调整：插件包上提到仓库根，支持 git 依赖安装。**
+
+原插件位于 `packages/plugin/`，pnpm 的 git 依赖只读仓库根 `package.json`，
+导致 `dsh plugin add github:...#tag` 无法安装（会去根找不存在的 `packages/plugin`
+而报错）。现将 `src/`、`test/`、`tsconfig.json`、`tsdown.client.config.ts`、
+`pnpm-lock.yaml` 全部上提到根，根 `package.json` 即为 `@jackguo0310/opencode2dsh`
+插件本体。
+
+安装/升级改为与 `dsh-cost` 一致：
+
+```
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.1
+```
+
+`prepare` 会在拉取后自动构建主机与客户端 bundle。
+
 ## 1.0.0 (2026-09-22)
 
 从 FishBottle7/opencode2dsh fork 而来的自维护基线，版权归属切换至

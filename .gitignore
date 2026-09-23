@@ -2,16 +2,16 @@
 node_modules/
 
 # Build output
-packages/plugin/lib/
-packages/plugin/bin/
-packages/plugin/README.md
-packages/plugin/README.zh-CN.md
-packages/plugin/LICENSE
-legacy/agent/.gotmp/
+lib/
+bin/
 
 # Logs / local state
 *.log
+*.tgz
+.pnpm-store/
 
 # Local drafts
 xiaohongshu-post.md
-*.tgz
+
+# Go sidecar build cache (legacy/)
+legacy/agent/.gotmp/
