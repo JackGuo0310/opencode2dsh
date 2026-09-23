@@ -46,16 +46,16 @@ install.
 **From npm**:
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.0
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.1
 ```
 
 **From source** (build the tarball yourself):
 
 ```sh
 git clone https://github.com/JackGuo0310/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+cd opencode2dsh
 pnpm install && pnpm pack
-dsh plugin --profile web add ./opencode2dsh-dsh-plugin-<version>.tgz
+dsh plugin --profile web add ./jackguo0310-opencode2dsh-<version>.tgz
 ```
 
 **Verify**: restart `dsh web`, open the model picker, and pick a model from
@@ -63,6 +63,11 @@ the **opencode2dsh** group.
 
 Requires DSH (DeepSeek Harness) with a web profile; Node.js ≥ 20 (already
 present if DSH runs); outbound HTTPS to `opencode.ai` and `models.dev`.
+
+> **Compatibility** — this fork is built and verified against **DSH `0.1.7-alpha.2`**.
+> Model routing / calls are unaffected by the host's plugin-settings slot
+> contract; on hosts that omit `settings.get/mutate` the settings card is
+> simply absent (a warning, not an error).
 
 ## Configuration
 
@@ -156,7 +161,7 @@ The plugin writes a health snapshot after every refresh round:
 
 ```sh
 git clone https://github.com/JackGuo0310/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+cd opencode2dsh
 pnpm install
 pnpm typecheck && pnpm test   # 44 unit tests
 pnpm build                    # bundle to lib/
@@ -165,7 +170,7 @@ pnpm build                    # bundle to lib/
 The legacy Go sidecar lives in `legacy/agent` (`go test ./...`). Architecture
 notes and the porting record live in `docs/`.
 
-Releasing: `pnpm pack` in `packages/plugin` (prepack builds and syncs docs).
+Releasing: `pnpm pack` (prepack builds the host and client bundles).
 
 ## Acknowledgments
 

@@ -44,22 +44,26 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 **从 npm 安装**：
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.0
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.1
 ```
 
 **从源码安装**（自行打包）：
 
 ```sh
 git clone https://github.com/JackGuo0310/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+cd opencode2dsh
 pnpm install && pnpm pack
-dsh plugin --profile web add ./opencode2dsh-dsh-plugin-<version>.tgz
+dsh plugin --profile web add ./jackguo0310-opencode2dsh-<version>.tgz
 ```
 
 **验证**：重启 `dsh web`，打开模型选择器，在 **opencode2dsh** 分组里选模型即可。
 
 需要带 web profile 的 DSH（DeepSeek Harness）；Node.js ≥ 20（DSH 能跑就满足）；
 出站 HTTPS 需可达 `opencode.ai` 与 `models.dev`。
+
+> **兼容性说明** —— 本 fork 基于并已验证于 **DSH `0.1.7-alpha.2`**。
+> 模型路由/调用不受宿主插件设置槽位契约影响；若宿主缺少 `settings.get/mutate`，
+> 设置卡片只是不显示（一条警告，非报错）。
 
 ## 配置
 
@@ -148,7 +152,7 @@ https://opencode.ai/zen/v1        ← Authorization: Bearer public
 
 ```sh
 git clone https://github.com/JackGuo0310/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+cd opencode2dsh
 pnpm install
 pnpm typecheck && pnpm test   # 44 个单元测试
 pnpm build                    # 打包到 lib/
@@ -156,7 +160,7 @@ pnpm build                    # 打包到 lib/
 
 旧版 Go sidecar 在 `legacy/agent`（`go test ./...`）。架构说明与移植记录见 `docs/`。
 
-发布：在 `packages/plugin` 执行 `pnpm pack`（prepack 会构建并同步文档）。
+发布：执行 `pnpm pack`（prepack 会构建主机与客户端 bundle）。
 
 ## 致谢
 
