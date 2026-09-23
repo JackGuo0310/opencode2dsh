@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.2 (2026-09-23)
+
+**修复:客户端半边不再在模块级依赖 `settingsScope`,避免 DSH 0.1.7-alpha 上启动失败。**
+
+DSH 0.1.7-alpha 移除了 `settingsScope` 服务;旧代码在 browser half 的
+模块级 `inject` 里声明了它,cordis 因而一直 "waiting for service:
+settingsScope",导致整个插件 bundle 不激活、启动页报
+`Failed to load plugins ... did not activate`。
+
+现在改为嵌套 `inject(['settingsScope'], ...)`(同 dshmarket 的做法):
+宿主提供该服务时才挂 IP 池设置卡;不提供时仅缺少卡片,**模型路由/调用完全不受影响**。
+
 ## 1.0.1 (2026-09-23)
 
 **仓库结构调整：插件包上提到仓库根，支持 git 依赖安装。**
