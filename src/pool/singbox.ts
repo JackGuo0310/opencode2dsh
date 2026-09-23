@@ -191,14 +191,21 @@ export function buildOutbound(node: ParsedNode, tag: string): Record<string, unk
     case 'hysteria2':
       out.type = 'hysteria2'
       out.password = getStr(raw, 'password')
-      applyTLS(raw, out)
+      // hysteria2 is QUIC/TLS-mandatory: sing-box rejects the outbound with
+      // "TLS required" when no tls block is present (e.g. Clash YAML nodes
+      // that carry no explicit `tls: true`). Force it like anytls.
+      applyTLS({ ...raw, tls: true }, out)
       break
     case 'tuic':
       out.type = 'tuic'
       out.uuid = getStr(raw, 'uuid')
       out.password = getStr(raw, 'password')
       out.congestion_control = getStrDefault(raw, 'congestion-controller', 'bbr')
-      applyTLS(raw, out)
+      // tuic is QUIC/TLS-mandatory (same as anytls): Clash YAML tuic nodes
+      // often omit `tls: true` and only set `disable-sni`, so an unforced
+      // applyTLS silently drops the tls block and sing-box check fails with
+      // "initialize outbound[n]: TLS required".
+      applyTLS({ ...raw, tls: true }, out)
       break
     case 'anytls':
       out.type = 'anytls'

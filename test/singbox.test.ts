@@ -58,13 +58,28 @@ test('buildOutbound: trojan/vless/hysteria2/tuic map their credentials', () => {
     name: 'h', type: 'hysteria2', server: 'h.example.com', port: 443,
     raw: { type: 'hysteria2', password: 'pw2' },
   }, 'out-h')
-  assert.deepEqual(hy2, { tag: 'out-h', type: 'hysteria2', server: 'h.example.com', server_port: 443, password: 'pw2' })
+  // hysteria2 is TLS-mandatory: the tls block is forced even when the node
+  // carries no explicit TLS fields (sing-box: "TLS required" otherwise).
+  assert.deepEqual(hy2, {
+    tag: 'out-h', type: 'hysteria2', server: 'h.example.com', server_port: 443,
+    password: 'pw2', tls: { enabled: true },
+  })
 
   const tuic = buildOutbound({
     name: 'tu', type: 'tuic', server: 'q.example.com', port: 443,
     raw: { type: 'tuic', uuid: 'u', password: 'p' },
   }, 'out-tu')
   assert.equal(tuic?.congestion_control, 'bbr')
+  // tuic is TLS-mandatory too (Clash YAML nodes often only set disable-sni)
+  assert.deepEqual(tuic?.tls, { enabled: true })
+})
+
+test('buildOutbound: tuic/hysteria2 keep sni when the node carries one', () => {
+  const tuic = buildOutbound({
+    name: 'tu', type: 'tuic', server: 'q.example.com', port: 443,
+    raw: { type: 'tuic', uuid: 'u', password: 'p', sni: 'q.example.com', 'skip-cert-verify': true },
+  }, 'out-tu')
+  assert.deepEqual(tuic?.tls, { enabled: true, server_name: 'q.example.com', insecure: true })
 })
 
 test('buildOutbound: anytls forces TLS on (GoProxy forceTLS)', () => {
