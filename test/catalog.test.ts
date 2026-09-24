@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { gzipSync } from 'node:zlib'
 import { decodeModelsDev, decide, fetchZenModels, isFreeModel, ModelCatalog, staticFreeModels } from '../src/adapter/catalog.ts'
 import { opencodeUserAgent } from '../src/adapter/ids.ts'
 
@@ -271,6 +272,16 @@ test('fetchZenModels sends the anonymous CLI disguise and parses ids', async () 
     fetchZenModels('https://opencode.ai/zen', fakeFetch({ 'https://opencode.ai/zen/v1/models': { data: [] } }), opencodeUserAgent()),
     /empty list/,
   )
+})
+
+test('fetchZenModels decodes proxy-compressed model directories', async () => {
+  const encoded = gzipSync(Buffer.from(JSON.stringify(zenBody)))
+  const fetchImpl = (async () => new Response(encoded, {
+    status: 200,
+    headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+  })) as typeof fetch
+  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
 })
 
 test('ModelCatalog intersects the live catalog with free decisions', async () => {

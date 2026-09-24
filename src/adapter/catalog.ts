@@ -1,4 +1,5 @@
 import { readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises'
+import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
 
 import { opencodeUserAgent } from './ids.ts'
@@ -408,13 +409,30 @@ export async function fetchZenModels(
     }),
   )
   if (!response.ok) throw new Error(`models endpoint returned HTTP ${response.status}`)
-  const payload = (await response.json()) as { data?: Array<{ id?: unknown }> }
+  const body = await decodeResponseBody(response)
+  let payload: { data?: Array<{ id?: unknown }> }
+  try {
+    payload = JSON.parse(body) as { data?: Array<{ id?: unknown }> }
+  } catch (error) {
+    throw new Error(`models endpoint returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
+  }
   const models: string[] = []
   for (const item of payload.data ?? []) {
     if (typeof item?.id === 'string' && item.id.length > 0) models.push(item.id)
   }
   if (models.length === 0) throw new Error('models endpoint returned an empty list')
   return models
+}
+
+async function decodeResponseBody(response: Response): Promise<string> {
+  const bytes = new Uint8Array(response.body === null ? [] : await response.arrayBuffer())
+  const encoding = (response.headers.get('content-encoding') ?? '').trim().toLowerCase()
+  if (encoding === 'gzip' || (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)) return gunzipSync(bytes).toString('utf8')
+  if (encoding === 'deflate' || (bytes.length >= 2 && bytes[0] === 0x78 && (bytes[1] === 0x01 || bytes[1] === 0x9c || bytes[1] === 0xda))) return inflateSync(bytes).toString('utf8')
+  if (encoding === 'br') return brotliDecompressSync(bytes).toString('utf8')
+  if (encoding === 'zstd') return zstdDecompressSync(bytes).toString('utf8')
+  if (encoding && !['identity', 'none'].includes(encoding)) throw new Error(`models endpoint returned unsupported content-encoding ${encoding}`)
+  return new TextDecoder('utf-8').decode(bytes)
 }
 
 interface MetadataCache {
