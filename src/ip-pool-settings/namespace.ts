@@ -16,7 +16,15 @@
  */
 
 import Schema from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+
+/** Branded settings namespace, mirroring dsh-settings' pre-0.1.7 helper without hosting it. */
+export type SettingsNamespace = string & { readonly __settingsNamespaceTag?: 'settings' }
+
+/** Brand a raw string as a settings namespace (lowercase kebab-case). */
+export function settingsNamespace(value: string): SettingsNamespace {
+  if (!/^[a-z][a-z0-9-]*$/.test(value)) throw new TypeError(`settings namespace "${value}" must be lowercase kebab-case`)
+  return value as SettingsNamespace
+}
 
 /** Namespace owned by this plugin (kebab-case per brand rules). */
 export const IP_POOL_NAMESPACE = settingsNamespace('ip-pool')
