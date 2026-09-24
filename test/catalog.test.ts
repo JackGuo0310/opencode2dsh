@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { gzipSync } from 'node:zlib'
+import { gzipSync, zstdCompressSync } from 'node:zlib'
 import { decodeModelsDev, decide, fetchZenModels, isFreeModel, ModelCatalog, staticFreeModels } from '../src/adapter/catalog.ts'
 import { opencodeUserAgent } from '../src/adapter/ids.ts'
 
@@ -272,6 +272,7 @@ test('fetchZenModels sends the anonymous CLI disguise and parses ids', async () 
   const headers = new Headers(capture.init?.headers)
   assert.equal(headers.get('authorization'), 'Bearer public')
   assert.equal(headers.get('x-opencode-client'), 'cli')
+  assert.equal(headers.get('accept-encoding'), 'identity')
   assert.ok(headers.get('user-agent')?.startsWith('opencode/'))
   await assert.rejects(
     fetchZenModels('https://opencode.ai/zen', fakeFetch({ 'https://opencode.ai/zen/v1/models': { data: [] } }), opencodeUserAgent()),
@@ -284,6 +285,25 @@ test('fetchZenModels decodes proxy-compressed model directories', async () => {
   const fetchImpl = (async () => new Response(encoded, {
     status: 200,
     headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+  })) as typeof fetch
+  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
+})
+
+test('fetchZenModels accepts a decoded body with a stale Brotli header', async () => {
+  const fetchImpl = (async () => new Response(JSON.stringify(zenBody), {
+    status: 200,
+    headers: { 'content-type': 'application/json', 'content-encoding': 'br' },
+  })) as typeof fetch
+  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
+})
+
+test('fetchZenModels detects zstd-compressed bodies without relying on headers', async () => {
+  const encoded = zstdCompressSync(Buffer.from(JSON.stringify(zenBody)))
+  const fetchImpl = (async () => new Response(encoded, {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
   })) as typeof fetch
   const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
   assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])

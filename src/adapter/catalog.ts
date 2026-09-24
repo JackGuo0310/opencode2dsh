@@ -405,6 +405,10 @@ export async function fetchZenModels(
         'user-agent': userAgent,
         'x-opencode-client': 'cli',
         accept: 'application/json',
+        // Ask intermediaries for plain JSON. Some proxy/fetch combinations
+        // expose Content-Encoding after already decoding the body (or vice
+        // versa), which previously made valid JSON look like compressed data.
+        'accept-encoding': 'identity',
       },
     }),
   )
@@ -427,13 +431,47 @@ export async function fetchZenModels(
 async function decodeResponseBody(response: Response): Promise<string> {
   const bytes = new Uint8Array(response.body === null ? [] : await response.arrayBuffer())
   const encoding = (response.headers.get('content-encoding') ?? '').trim().toLowerCase()
-  if (encoding === 'gzip' || (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)) return gunzipSync(bytes).toString('utf8')
-  if (encoding === 'deflate' || (bytes.length >= 2 && bytes[0] === 0x78 && (bytes[1] === 0x01 || bytes[1] === 0x9c || bytes[1] === 0xda))) return inflateSync(bytes).toString('utf8')
-  if (encoding === 'br') return brotliDecompressSync(bytes).toString('utf8')
-  if (encoding === 'zstd') return zstdDecompressSync(bytes).toString('utf8')
+
+  // DSH's fetch implementation may transparently decode the body while leaving
+  // the original Content-Encoding header intact. Check for JSON before using
+  // the header as a decompression instruction; otherwise an already-decoded
+  // response is fed to Brotli/zstd and fails with misleading JSON errors.
+  const raw = new TextDecoder('utf-8').decode(bytes)
+  if (raw.trimStart().startsWith('{') || raw.trimStart().startsWith('[')) return raw
+
+  const attempts: Array<() => string> = []
+  if (encoding === 'gzip' || isGzip(bytes)) attempts.push(() => gunzipSync(bytes).toString('utf8'))
+  if (encoding === 'deflate' || isDeflate(bytes)) attempts.push(() => inflateSync(bytes).toString('utf8'))
+  if (encoding === 'br') attempts.push(() => brotliDecompressSync(bytes).toString('utf8'))
+  if (encoding === 'zstd' || isZstd(bytes)) attempts.push(() => zstdDecompressSync(bytes).toString('utf8'))
+  for (const decode of attempts) {
+    try {
+      const decoded = decode()
+      if (decoded.trimStart().startsWith('{') || decoded.trimStart().startsWith('[')) return decoded
+    } catch {
+      // Try the next advertised/magic-number decoder before reporting the
+      // original body as invalid JSON.
+    }
+  }
   if (encoding && !['identity', 'none'].includes(encoding)) throw new Error(`models endpoint returned unsupported content-encoding ${encoding}`)
-  return new TextDecoder('utf-8').decode(bytes)
+  return raw
 }
+
+function isGzip(bytes: Uint8Array): boolean {
+  return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b
+}
+
+function isDeflate(bytes: Uint8Array): boolean {
+  return bytes.length >= 2 && bytes[0] === 0x78 && (bytes[1] === 0x01 || bytes[1] === 0x9c || bytes[1] === 0xda)
+}
+
+function isZstd(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) return false
+  if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) return true
+  const descriptor = bytes[3] as number
+  return bytes[0] === 0x50 && bytes[1] === 0x2a && bytes[2] === 0x4d && descriptor >= 0x18 && descriptor <= 0x1f
+}
+
 
 interface MetadataCache {
   updatedAt: number
