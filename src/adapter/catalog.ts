@@ -20,7 +20,7 @@ export const ZEN_BASE_URL = 'https://opencode.ai/zen'
 /** Verified against the anonymous lane with a real chat (agent/internal/catalog/static_models.go). */
 export const staticFreeModels: string[] = [
   'big-pickle', // verified 2026-08-28: anonymous chat 200 (non-stream + stream)
-  'mimo-v2.5-free', // verified 2026-08-28: anonymous chat 200 (non-stream)
+  'space-bunny-free', // verified 2026-09-24: Zen and models.dev list the anonymous free model
   'ling-3.0-flash-fin-free', // verified 2026-09-01: anonymous chat 200
   'nemotron-3.5-lightning-free', // verified 2026-09-01: anonymous chat 200
   'nemotron-3-ultra-free', // verified 2026-09-01: anonymous chat 200 (7s, earlier timeout was transient)

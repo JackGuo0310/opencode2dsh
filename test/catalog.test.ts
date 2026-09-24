@@ -14,6 +14,11 @@ test('isFreeModel keys on the name', () => {
   assert.ok(!isFreeModel('qwen3-max'))
 })
 
+test('static fallback includes the current Space Bunny model and drops retired MiMo', () => {
+  assert.ok(staticFreeModels.includes('space-bunny-free'))
+  assert.ok(!staticFreeModels.includes('mimo-v2.5-free'))
+})
+
 test('decide gives ready metadata verdicts priority over the name', () => {
   // metadata pending: free-named pass, others blocked, nothing known
   assert.deepEqual(decide('x-free', new Map(), false), { allowed: true, source: 'name_free', known: false })
@@ -316,20 +321,20 @@ test('ModelCatalog falls back to static ids while the live catalog is pending', 
 })
 
 test('S3 vouch survives a stale deprecated flag but not a paid verdict', async () => {
-  // hy3-free regression: models.dev flags it deprecated while it still works
-  // upstream — a compile-time verified id keeps its vouch until delisted.
+  // Static-verified regression: models.dev may briefly flag a model deprecated
+  // while it still works upstream — the S3 vouch remains until Zen delists it.
   const deprecatedFlagged = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': { data: [{ id: 'mimo-v2.5-free' }] },
+      'https://opencode.ai/zen/v1/models': { data: [{ id: 'space-bunny-free' }] },
       'https://models.dev/api.json': {
-        opencode: { models: { 'mimo-v2.5-free': { status: 'deprecated', cost: { input: 0, output: 0 } } } },
+        opencode: { models: { 'space-bunny-free': { status: 'deprecated', cost: { input: 0, output: 0 } } } },
       },
     }),
   })
   try {
     await deprecatedFlagged.refreshOnce()
-    assert.equal(deprecatedFlagged.decision('mimo-v2.5-free').allowed, true)
-    assert.equal(deprecatedFlagged.decision('mimo-v2.5-free').source, 'static_verified')
+    assert.equal(deprecatedFlagged.decision('space-bunny-free').allowed, true)
+    assert.equal(deprecatedFlagged.decision('space-bunny-free').source, 'static_verified')
   } finally {
     deprecatedFlagged.stop()
   }
