@@ -61,7 +61,7 @@ export function apply(ctx: ClientContext): void {
     inject?(
       services: string[],
       callback: (scoped: {
-        settingsScope: ClientContext['settingsScope']
+        settingsScope?: { bind(options: { namespace: string }): unknown }
         slots: ClientContext['slots']
       }) => void,
     ): void
@@ -70,7 +70,8 @@ export function apply(ctx: ClientContext): void {
   // mounts; the bundle stays alive and model routing is untouched.
   if (typeof scopedInject !== 'function') return
   scopedInject(['settingsScope'], (scoped) => {
-    const scope = scoped.settingsScope.bind({ namespace: SETTINGS_NAMESPACE }) as unknown as IpPoolCardInjected['scope']
+    if (!scoped.settingsScope) return
+    const scope = scoped.settingsScope.bind({ namespace: SETTINGS_NAMESPACE }) as IpPoolCardInjected['scope']
     // The scope's methods are instance methods (this-bound to the controller);
     // uSES receives them as bare functions, so bind explicitly — an unbound
     // getSnapshot reads `this.store` of undefined and crashes the card.

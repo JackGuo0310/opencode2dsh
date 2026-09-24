@@ -1,6 +1,6 @@
 {
   "name": "@jackguo0310/opencode2dsh",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Free OpenCode Zen models for DeepSeek Harness (DSH): native dsh-llm adapter plugin, no API key.",
   "type": "module",
   "main": "lib/index.js",
@@ -71,6 +71,18 @@
     "@earendil-works/pi-ai": "^0.82.1",
     "undici": "^8.10.1",
     "yaml": "^2.9.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.1.8",
+    "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.1.8"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    }
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
