@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ModelCatalog } from '../src/adapter/catalog.ts'
-import { isResponsesModel, PROVIDER_ID, reasoningEfforts, reasoningEffortWire, ZenAdapter } from '../src/adapter/zen-adapter.ts'
+import { effortWireIsRefusable, isResponsesModel, PROVIDER_ID, reasoningEfforts, reasoningEffortWire, ZenAdapter } from '../src/adapter/zen-adapter.ts'
+import { setRotateDelegate } from '../src/pool/rotate.ts'
 
 /**
  * The exact method surface dsh-llm touches on a registered adapter. A missing
@@ -111,13 +112,28 @@ test('reasoningEfforts: declared ladder wins, none folds into off, default ladde
 test('reasoningEffortWire maps picker ids to the gateway spelling', () => {
   // no selection: inject nothing (provider default keeps always-think models thinking)
   assert.equal(reasoningEffortWire(undefined), undefined)
-  // off must SEND none — a mere omission never disables Zen's thinking models
-  assert.equal(reasoningEffortWire('off'), 'none')
+  // off has no accepted wire value left (live-probed 2026-09-24: both 'none'
+  // and 'off' are hard 400s), so it must inject nothing rather than fail the turn
+  assert.equal(reasoningEffortWire('off'), undefined)
   // ladder levels pass through verbatim
   assert.equal(reasoningEffortWire('low'), 'low')
   assert.equal(reasoningEffortWire('xhigh'), 'xhigh')
   // unknown ids were never advertised; inject nothing rather than risk the 400
   assert.equal(reasoningEffortWire('banana'), undefined)
+})
+
+test('effortWireIsRefusable only claims a 400 that names a refused field', () => {
+  // the live 400 from the gateway
+  assert.equal(
+    effortWireIsRefusable('400: {"error":{"type":"invalid_request_error","message":"Upstream request failed: [invalid_request_error] invalid request"}}'),
+    true,
+  )
+  assert.equal(effortWireIsRefusable('400: reasoning_effort must be minimal|low|medium|high|xhigh|max'), true)
+  // other failures are the exit's or the lane's, not a schema rejection
+  assert.equal(effortWireIsRefusable('403: free tier can only be used from within OpenCode'), false)
+  assert.equal(effortWireIsRefusable('429: rate limit'), false)
+  assert.equal(effortWireIsRefusable('500: internal server error'), false)
+  assert.equal(effortWireIsRefusable('opencode2dsh: first stream event timeout'), false)
 })
 
 test('resolveModel advertises the thinking-level picker for reasoning models only', () => {
@@ -176,9 +192,11 @@ async function runStream(catalogReasoning: boolean, effort?: string): Promise<Ar
 }
 
 test('stream injects the selected reasoning_effort into the outgoing body', async () => {
-  // off -> wire none (the only spelling that stops the always-think models)
+  // off -> nothing injected (the lane retired `none`; omitting the field is
+  // the only honest spelling of "do not pin an effort")
   const offOptions = (await runStream(true, 'off'))[0]!
-  assert.deepEqual(offOptions.onPayload?.({ ...gateBody }), { ...gateBody, reasoning_effort: 'none' })
+  assert.deepEqual(offOptions.onPayload?.({ ...gateBody }), undefined)
+  assert.equal(typeof offOptions.onPayload, 'function', 'the free-lane gate shaper still runs')
 
   // ladder levels ride verbatim
   const lowOptions = (await runStream(true, 'low'))[0]!
@@ -192,9 +210,9 @@ test('stream injects the selected reasoning_effort into the outgoing body', asyn
 
 test('stream keeps the free-lane gate rewrite alongside the effort injection', async () => {
   // a body missing the gate tools gets them AND the effort in one rewrite
-  const offOptions = (await runStream(true, 'off'))[0]!
-  const shaped = offOptions.onPayload?.({ model: 'big-pickle', messages: [], stream: true }) as Record<string, unknown>
-  assert.equal(shaped.reasoning_effort, 'none')
+  const lowOptions = (await runStream(true, 'low'))[0]!
+  const shaped = lowOptions.onPayload?.({ model: 'big-pickle', messages: [], stream: true }) as Record<string, unknown>
+  assert.equal(shaped.reasoning_effort, 'low')
   assert.deepEqual(
     (shaped.tools as Array<{ function: { name: string } }>).map((t) => t.function.name).sort(),
     ['bash', 'read'],
@@ -202,7 +220,7 @@ test('stream keeps the free-lane gate rewrite alongside the effort injection', a
   assert.equal(shaped.tool_choice, 'none')
 
   // non-chat payloads pass through untouched even with an effort selected
-  assert.equal(offOptions.onPayload?.(null), undefined)
+  assert.equal(lowOptions.onPayload?.(null), undefined)
 })
 
 test('stream builds the pi-ai wire model with the catalog limits', async () => {
@@ -298,6 +316,111 @@ test('an image turn with no attachment service fails loudly instead of dropping 
   assert.equal(chunks.length, 1)
   assert.equal(chunks[0]?.reason?.kind, 'error')
   assert.equal(chunks[0]?.reason?.failure?.code, 'UNSUPPORTED_CONTENT')
+})
+
+/** pi-ai delivers failures on an `error` event shaped like a done message. */
+function piError(errorMessage: string): { type: string; error: Record<string, unknown> } {
+  return {
+    type: 'error',
+    error: {
+      api: 'openai-completions',
+      provider: 'opencode2dsh',
+      model: 'big-pickle',
+      content: [],
+      stopReason: 'error',
+      errorMessage,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+    },
+  }
+}
+
+/** Provider that refuses a body carrying `reasoning_effort`, then answers. */
+function effortRefusingProvider() {
+  const efforts: Array<string | undefined> = []
+  const provider = {
+    streamSimple(_model: unknown, _context: unknown, options: { onPayload?: (payload: unknown) => unknown }): AsyncIterable<{ type: string }> {
+      // The real body already satisfies the free-lane gate, so the shaper
+      // returns it untouched; the refusal decision must read the rewritten
+      // body, not whether a rewrite happened at all.
+      const shaped = options.onPayload?.({
+        model: 'big-pickle',
+        messages: [],
+        stream: true,
+        tools: ['bash', 'read'].map((name) => ({ type: 'function', function: { name, description: 'd', parameters: {} } })),
+      }) as Record<string, unknown> | undefined
+      const effort = shaped?.reasoning_effort as string | undefined
+      efforts.push(effort)
+      return (async function* () {
+        if (effort !== undefined) {
+          yield piError('400: {"error":{"type":"invalid_request_error","message":"Upstream request failed: [invalid_request_error] invalid request"}}')
+          return
+        }
+        yield { type: 'start' }
+        yield { type: 'text_start', contentIndex: 0 }
+        yield { type: 'text_delta', contentIndex: 0, delta: 'ok' }
+        yield { type: 'text_end', contentIndex: 0, content: 'ok' }
+        yield { type: 'done', message: { model: 'big-pickle', stopReason: 'stop', content: [{ type: 'text', text: 'ok' }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }
+      })()
+    },
+  }
+  return { provider, efforts }
+}
+
+test('a 400 over the injected effort drops the field and resends once', async (t) => {
+  // The effort repair and the IP-pool rotate are independent paths, and the
+  // rotate delegate is process-global state other suites install. Pin it off so
+  // this asserts the effort path alone; rotation has its own tests.
+  setRotateDelegate(null)
+  t.after(() => setRotateDelegate(null))
+  const { provider, efforts } = effortRefusingProvider()
+  const adapter = new ZenAdapter(
+    {
+      list: () => ['big-pickle'],
+      decision: () => ({ allowed: true, source: 'test', known: true }),
+      reasoningCapability: () => ({ reasoning: true, effortValues: [] }),
+    },
+    { providerOverride: provider },
+  )
+  let text = ''
+  let finish: { kind: string; failure?: { message: string; code: string } } | undefined
+  for await (const chunk of adapter.stream({ provider: 'opencode2dsh', model: 'big-pickle', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], reasoningEffort: 'high' } as never)) {
+    if (chunk.type === 'text-delta') text += chunk.text
+    if (chunk.type === 'finish') finish = chunk.reason as { kind: string; failure?: { message: string; code: string } }
+  }
+  assert.deepEqual(efforts, ['high', undefined], 'one resend, with the field dropped')
+  assert.equal(text, 'ok', 'the turn completes instead of failing')
+  assert.equal(finish?.kind, 'stop', `finish was ${JSON.stringify(finish)}`)
+})
+
+test('a 400 the effort did not cause is surfaced, not retried', async (t) => {
+  // a 403 is the exit's business: the rotate loop owns it, so the field stays
+  setRotateDelegate(null)
+  t.after(() => setRotateDelegate(null))
+  let dispatched = 0
+  const adapter = new ZenAdapter(
+    {
+      list: () => ['big-pickle'],
+      decision: () => ({ allowed: true, source: 'test', known: true }),
+      reasoningCapability: () => ({ reasoning: true, effortValues: [] }),
+    },
+    {
+      providerOverride: {
+        streamSimple: () => {
+          dispatched += 1
+          return (async function* () {
+            yield piError('403: free tier can only be used from within OpenCode')
+          })()
+        },
+      },
+    },
+  )
+  let finish: { kind: string; failure?: { code: string } } | undefined
+  for await (const chunk of adapter.stream({ provider: 'opencode2dsh', model: 'big-pickle', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], reasoningEffort: 'high' } as never)) {
+    if (chunk.type === 'finish') finish = chunk.reason as { kind: string; failure?: { code: string } }
+  }
+  assert.equal(dispatched, 1, 'no pointless resend on a non-schema failure')
+  assert.equal(finish?.kind, 'error')
+  assert.equal(finish?.failure?.code, 'AUTH')
 })
 
 test('isResponsesModel routes muse-spark to responses, everything else to chat', () => {

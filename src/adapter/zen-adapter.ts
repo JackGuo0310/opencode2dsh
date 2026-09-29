@@ -133,18 +133,41 @@ export function reasoningEfforts(capability: { reasoning: boolean; effortValues:
 
 /**
  * The `reasoning_effort` wire value for a selected effort id. The Zen gateway
- * validates the field against `minimal|low|medium|high|xhigh|max|none`
- * (live-probed 2026-09-18: any other value is a hard 400), and `none` is the
- * only spelling that stops the always-think free models from thinking — a
- * mere omission keeps the provider default. So `off` maps to wire `none`,
- * ladder levels pass through verbatim, and unknown ids (never advertised)
- * inject nothing rather than risk the 400.
+ * validates the field against `minimal|low|medium|high|xhigh|max` (live-probed
+ * 2026-09-24: every level answers 200), so ladder levels pass through verbatim
+ * and an unknown id (never advertised) injects nothing rather than risk a 400.
+ *
+ * `off` — the only id with no accepted wire spelling left. The gateway used to
+ * accept `none` here (live-probed 2026-09-18) and has since retired it: both
+ * `none` and `off` are hard 400s now, while omitting the field keeps the
+ * provider default. Off therefore sends nothing, which is the honest spelling
+ * of "do not pin an effort"; {@link effortWireIsRefusable} keeps a retired
+ * value from costing the turn should the ladder move again.
  */
 export function reasoningEffortWire(id: string | undefined): string | undefined {
   if (id === undefined) return undefined
-  if (id === 'off') return 'none'
+  if (id === 'off') return undefined
   return (REASONING_EFFORT_LADDER as readonly string[]).includes(id) ? id : undefined
 }
+
+/**
+ * True when a 400 names a rejected effort value — this request failed purely
+ * because an optional field was refused. Only a 400 counts: 401/403/429 mean
+ * the lane or the exit, where the value is irrelevant and the rotate loop owns
+ * the answer. The match is deliberately loose, because the body is the
+ * gateway's rather than ours: a false positive costs one resend that omits an
+ * optional field, while a false negative costs the user their turn.
+ */
+export function effortWireIsRefusable(message: string): boolean {
+  return /\b400\b/.test(message) && /reasoning[_. ]?effort|invalid[_ ]request|unprocessable/i.test(message)
+}
+
+/**
+ * How many times one stream may drop a refused `reasoning_effort` and resend.
+ * One: the field is the only optional value this adapter injects, so a second
+ * refusal is the same failure with nothing left to remove.
+ */
+export const EFFORT_RETRY_LIMIT = 1
 
 /** Anonymous credential: the literal upstream accepts for the free lane. */
 const ANONYMOUS_KEY = 'public'
@@ -419,9 +442,13 @@ export class ZenAdapter {
       ? Math.max(this.#bodyIdleMs, this.#responsesBodyIdleMs)
       : this.#bodyIdleMs
     const rotateStory: string[] = []
+    // Effort-drop resends are counted separately from IP rotations: they never
+    // change the exit, they only stop injecting a field the lane refused.
+    let effortDropped = 0
+    const effortStory: string[] = []
     for (let attempt = 0; ; attempt += 1) {
       const events = routingContext.run(contextStore, () =>
-        self.#eventsFor(options, context, ids, model),
+        self.#eventsFor(options, context, ids, model, effortDropped > 0),
       ) as AsyncIterable<PiEvent>
       let deliveredContent = false
       let preContentFailure: { message: string } | null = null
@@ -538,6 +565,14 @@ export class ZenAdapter {
       // Exit-shaped failure before content: ask the pool whether rotating is
       // worth another attempt; otherwise surface the buffered events as-is.
       const failureMessage = (preContentFailure as { message: string }).message
+      // A 400 over a field this adapter injected is a schema rejection, not an
+      // exit problem: rotating cannot fix it and the pool would send the same
+      // exit away for nothing. Drop the field and resend once instead.
+      if (effortDropped < EFFORT_RETRY_LIMIT && reasoningEffortWire(options.reasoningEffort) !== undefined && effortWireIsRefusable(failureMessage)) {
+        effortDropped += 1
+        effortStory.push(failureMessage.slice(0, 120))
+        continue
+      }
       const failure = classifyStreamFailure(failureMessage)
       const deterministic = isRegionBlocked(failureMessage)
       const rotate = failure !== null
@@ -550,16 +585,17 @@ export class ZenAdapter {
         // what was tried, not just the last attempt's failure)
         for (let i = 0; i < buffered.length; i += 1) {
           const e = buffered[i] as PiEvent & { error?: { errorMessage?: string }; message?: { errorMessage?: string; stopReason?: string } }
+          const story = [
+            ...(rotateStory.length > 1 ? [`opencode2dsh 轮换 ${rotateStory.length - 1} 次后放弃: ${rotateStory.join(' -> ')}`] : []),
+            ...(effortStory.length > 0 ? [`opencode2dsh 已丢弃上游拒绝的 reasoning_effort 并重试: ${effortStory.join(' -> ')}`] : []),
+          ].join(' | ')
+          if (story.length === 0) continue
           if (e.type === 'error' && e.error) {
-            e.error.errorMessage = rotateStory.length > 1
-              ? `${e.error.errorMessage} (opencode2dsh 轮换 ${rotateStory.length - 1} 次后放弃: ${rotateStory.join(' -> ')})`
-              : e.error.errorMessage
+            e.error.errorMessage = `${e.error.errorMessage} (${story})`
             break
           }
           if (e.type === 'done' && e.message?.stopReason === 'error') {
-            e.message.errorMessage = rotateStory.length > 1
-              ? `${e.message.errorMessage} (opencode2dsh 轮换 ${rotateStory.length - 1} 次后放弃: ${rotateStory.join(' -> ')})`
-              : e.message.errorMessage!
+            e.message.errorMessage = `${e.message.errorMessage} (${story})`
             break
           }
         }
@@ -576,15 +612,16 @@ export class ZenAdapter {
     context: PiContext,
     ids: ReturnType<typeof deriveRequestIDs>,
     model: ReturnType<typeof toPiModel>,
+    skipEffort = false,
   ): unknown {
     // Structural boundary: PiContext (own types, unit-tested) -> pi-ai Context.
     // onPayload injects the free-lane gate tools (adapter/messages.ts) into the
     // serialized body right before dispatch — plain-chat contexts carry no
     // tools and the anonymous lane 403s every body without bash+read. The same
     // seam carries the selected reasoning effort: pi-ai has no option with the
-    // wire semantics this lane needs (selected off must SEND `none`, not omit),
-    // so the effort rides the payload rewrite instead.
-    const effortWire = reasoningEffortWire(options.reasoningEffort)
+    // wire semantics this lane needs, so the effort rides the payload rewrite
+    // instead. skipEffort is the resend after the lane refused the field.
+    const effortWire = skipEffort ? undefined : reasoningEffortWire(options.reasoningEffort)
     const onPayload =
       effortWire === undefined
         ? ensureFreeLaneShape

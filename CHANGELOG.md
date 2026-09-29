@@ -36,11 +36,18 @@
 - **附件服务缺失时明确报错。** 路由声明了 image 能力却没有附件服务时，
   回合以 `UNSUPPORTED_CONTENT` 失败，不静默吞掉用户附的图。
 
-### 已知问题（1.0.7 起存在，本次不修）
+### Fixed
 
-选思考等级 **Off** 时插件会发送 `reasoning_effort: "none"`，而 2026-09-24 实测
-上游已拒绝该取值（`400 invalid_request_error`），选 Off 的回合整体失败；`low`
-等其他档位正常。该行为自 1.0.7 引入（原为实测有效的取值），已单独记录跟踪。
+- **选思考等级 Off 不再 400。** 上游已弃用 `reasoning_effort: "none"`
+  （2026-09-24 实测：`none` 与 `off` 都是 `400 invalid_request_error`，而
+  `minimal|low|medium|high|xhigh|max` 全部 200），而插件仍在发送 `none`，
+  导致自 1.0.7 起选 Off 的每个回合都失败。
+  - `off` 现在不注入该字段（`reasoningEffortWire('off') === undefined`），
+    即「不指定档位」，模型按上游默认档位运行。
+  - 兜底：若上游 400 且点名了这个字段，适配器丢弃该字段重发一次
+    （`effortWireIsRefusable`），回合照常完成。401/403/429 属出口/通道问题，
+    不走这条路——换 IP 也修不好 schema 错误，那仍由轮换循环负责。
+  - 失败信息里会说明「已丢弃上游拒绝的 reasoning_effort 并重试」。
 
 ### 视频 / PDF / 音频：明确不支持
 
