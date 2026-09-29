@@ -349,8 +349,8 @@ opencode2dsh/
 | --- | --- | --- |
 | R1 | OpenCode 调整匿名通道（改凭证/缩白名单/取消） | S1 动态目录 + healthz `degraded` 让故障可见；README 明示该依赖关系。代码上把 `anonymousZenKey` 与上游 URL 收敛为单一常量便于跟进 |
 | R2 | 插件分发环境禁止原生二进制 | 兜底链：预编译包 → 本机 Go 编译 → 明确报错并给编译指引（§8.4） |
-| R3 | models.dev 判定与上游 `allowAnonymous` 不一致（判定免费但上游拒绝） | 400/403 透传给 DSH（§6.2），DSH 可切换模型；S3 清单只收录实测通过条目，降低误报面。实测 2026-09-24：`kimi-k2.5-free`/`minimax-m3-free` 为 401 not supported，`mimo-v2.6-flash-free`/`big-pickle` 为 403，free tier 实际只放行 `space-bunny-free` |
-| R6 | models.dev 声明的能力上游未真正开放 | 图片实测 2026-09-24：`image_url` data URI / 远程 URL / 伪造 data URI 一律 400，同 body 去图即 200；且 `space-bunny-free` 在 `/responses` 为 401（仅 chat）。管线本身正确且有单测，拦住的是上游。`harnessInputModalities` 只放行宿主能投递的 text/image（§4.1）；如实上报优于谎报，但上游未开放期间图片回合会 400，已在 CHANGELOG/README 明示 |
+| R3 | models.dev 判定与上游 `allowAnonymous` 不一致（判定免费但上游拒绝） | 400/403 透传给 DSH（§6.2），DSH 可切换模型；S3 清单只收录实测通过条目，降低误报面。实测 2026-09-24：83 个在售模型中 free tier 实际只放行 `space-bunny-free`（其余免费 id 为 403/401/500） |
+| R6 | 上游静默改变已支持的能力 | 图片实测 2026-09-24：**可用**——`space-bunny-free` 经完整链路能读图（4×4~320×240 均 200）。此前一轮「上游拒绝一切图片」的结论是**探测样本损坏**导致的误判（手写 base64 PNG 的 IDAT 长度字段解出 1073741824），教训是探测样本必须自校验结构。另测 `data:text/plain` 等非图片载荷仍被正确拒绝——即 400 应先怀疑字节完整性 |
 | R7 | 上游静默下线请求字段取值 | 实测 2026-09-24：`reasoning_effort` 的 `none`（自 1.0.7 起 Off 档所发）与 `off` 均为 400，而 `minimal\|low\|medium\|high\|xhigh\|max` 仍 200。`off` 改为不注入字段；兜底 `effortWireIsRefusable` 在 400 且点名该字段时丢弃重发一次（401/403/429 排除——那属出口/通道，换 IP 修不了 schema 错误） |
 | R4 | 端口冲突/防火墙 | 随机端口（`127.0.0.1:0`）为主；回环监听通常不受出站防火墙影响 |
 | R5 | 上游 SSE 语义变化 | Phase 0 验收含流式用例；`TeeReader` 透传路径对上游变化最不敏感（不做转换） |

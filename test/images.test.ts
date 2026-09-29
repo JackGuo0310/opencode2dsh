@@ -186,6 +186,46 @@ test('the text-only path never reads attachments, even with image blocks present
   assert.equal(userText(context.messages[0]), 'x')
 })
 
+/**
+ * Walk a PNG's chunk structure.
+ *
+ * This exists because of a real misdiagnosis: the hand-written base64 "PNG"
+ * used by the first round of live vision probes had a corrupt IDAT length
+ * field (it decoded to 1073741824 bytes), the lane correctly answered 400 for
+ * corrupt bytes, and that was misread as "the lane refuses every image". The
+ * plugin was fine; the fixture was not. A structural check makes that class of
+ * bad sample fail loudly instead of quietly producing a wrong conclusion.
+ */
+export function pngChunkTypes(bytes: Uint8Array): string[] {
+  const view = Buffer.from(bytes)
+  const signature = '89504e470d0a1a0a'
+  assert.equal(view.subarray(0, 8).toString('hex'), signature, 'PNG signature')
+  const types: string[] = []
+  let offset = 8
+  while (offset + 8 <= view.length) {
+    const length = view.readUInt32BE(offset)
+    const type = view.subarray(offset + 4, offset + 8).toString('ascii')
+    types.push(type)
+    offset += 12 + length
+  }
+  assert.equal(offset, view.length, `chunk lengths overrun the buffer by ${offset - view.length} byte(s)`)
+  assert.equal(types[0], 'IHDR', 'first chunk is IHDR')
+  assert.equal(types[types.length - 1], 'IEND', 'last chunk is IEND')
+  return types
+}
+
+test('the unit-test image fixture is a structurally valid PNG', () => {
+  // The stub above only needs bytes, but live probes reuse real images; keeping
+  // one validated generator here stops a corrupt sample from reaching them.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAHUlEQVQI12P4//8/AzYhYhjYGBgYGJgYGBgYGAAAHjgAF/6x1jBAAAAAElFTkSuQmCC',
+    'base64',
+  )
+  // This is the exact string the first live probe used. It is NOT valid — the
+  // assertion documents why, so nobody reintroduces it as a trusted sample.
+  assert.throws(() => pngChunkTypes(png), /overrun|signature/)
+})
+
 interface PiContext {
   messages: PiMessage[]
   systemPrompt?: string

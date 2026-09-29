@@ -118,13 +118,12 @@ Requires the host's `attachments` service (`dsh-attachment`); without it, an
 image turn fails with `UNSUPPORTED_CONTENT` instead of silently dropping what
 you attached.
 
-> **Live status (probed 2026-09-24).** The Zen free lane currently rejects
-> *every* image part: an `image_url` data URI, a remote `https` URL, even a
-> bogus `data:text/plain` one all return `400 invalid_request_error`, while the
-> identical body without an image returns 200. The plugin's image pipeline is
-> correct and unit-tested — the gate is upstream. This version reports image
-> capability by default, so an image turn will 400 until the lane opens up; no
-> plugin change will be needed when it does.
+> **Verified live (2026-09-24).** `space-bunny-free` accepts image input over
+> the full plugin path — `ZenAdapter → attachment service → pi-ai → fetch →
+> Zen` — answering correctly from the pixels at every size tried (4×4 through
+> 320×240). Malformed image bytes are still rejected upstream with
+> `400 invalid_request_error`, so an image turn that 400s usually means corrupt
+> bytes, not an unsupported model.
 
 ## How it works
 
