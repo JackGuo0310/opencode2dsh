@@ -72,11 +72,14 @@ Adds one entry: `data/plugins/FishBottle7__opencode2dsh.yml`.
 
 **What it does** — registers a native DSH `LlmAdapter` that streams from
 OpenCode Zen's free endpoint (`Authorization: Bearer public`), so the
-free models (big-pickle, hy3-free, ...) appear in the model picker without
-any API key. Catalog comes from the live `/v1/models` list
-intersected with models.dev free-by-metadata, falling back to a disk cache
-and a verified static list; the plugin auto-refreshes and writes a health
-snapshot to `~/.opencode2dsh/adapter-status.json`.
+free models (space-bunny-free, big-pickle, nemotron-3-ultra-free, ...) appear
+in the model picker without any API key. Catalog comes from the live
+`/v1/models` list intersected with models.dev free-by-metadata, falling back to
+a disk cache and a verified static list; the plugin auto-refreshes and writes a
+health snapshot to `~/.opencode2dsh/adapter-status.json`. models.dev also
+supplies each model's context window, thinking-level ladder, and input
+modalities — free models that declare image input (e.g. space-bunny-free)
+receive real image bytes; the rest stay text-only.
 
 **Install source** — published to npm as
 [`@jackguo0310/opencode2dsh`](https://www.npmjs.com/package/@jackguo0310/opencode2dsh);

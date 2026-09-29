@@ -164,6 +164,18 @@ Phase 0 ──► Phase 1 ──┬──► Phase 2 ──► 交付
   - `stream(options)` → 流式生成；请求须带 `attributionHeaders()`（`user-agent`）。
 - `registerConfigurableProviders(entries)`（index.js:1251）：可选，把 provider 挂进配置目录（供 Web 设置页显示/编辑）；`registerModelDiscovery(ns, discover)`（index.js:1315）：可选，供设置页「探测端点模型」。
 
+### A.3 `inputModalities` 的运行时语义（2026-09-24 实读 dsh-llm 确认，1.0.9 依赖）
+
+- 目录声明只是建议性，但 `resolveModel().inputModalities` **参与运行时行为**：
+  `adapterStream`（index.js:2311）在模型不含 `image` 时调用 `projectImagesForTextModel`，
+  把历史里的图片块换成占位文本，适配器根本收不到 `ImageBlock`。
+- 因此 `['text']` 与 `['text','image']` 是两种实质不同的实现：后者必须自行经
+  `ctx.attachments.readImageRequest(ref, target, signal)` 取字节、pi-ai 依
+  `Model.input` 决定是否序列化为 `image_url` data URI。
+- 宿主只定义 `ModelModalityMap = { text, image }` 两种模态。`FileBlock` 走
+  `projectFilesToText` 对**所有**路由无条件投影为句柄文本，video/pdf/audio 无适配器可投递，
+  故 `modalities.input` 需按此收窄后再上报（`harnessInputModalities`）。
+
 ### A.2 现成 OpenAI 兼容适配层：`@deepseek-ai/dsh-llm-pi-ai`
 
 内置插件 `llm-pi-ai`（settings 命名空间 `llm-pi-ai`）即为「OpenAI 兼容端点接入」的标准路径（基于 `@earendil-works/pi-ai`）：

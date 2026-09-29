@@ -46,7 +46,7 @@ llm-pi-ai:
 - `createProvider({id, name, baseUrl, headers, auth, models, api})`（models.d.ts:158）：构造 provider，`baseUrl` 直指 `https://opencode.ai/zen/v1`，`api` 传 `@earendil-works/pi-ai/api/openai-completions` 模块（导出 `stream`/`streamSimple`，即 DSH 一切 OpenAI 兼容 provider 使用的同一实现）
 - `StreamOptions.headers`（types.d.ts:78-85）：**调用方值覆盖默认头** → user-agent 伪装可覆盖（R-B 解除）；`StreamOptions` 是每次调用的参数 → **动态 session/request 头每请求构造传入**（R-A 解除）
 - `StreamOptions.apiKey`：传字面量 `'public'`（非秘密，无需 credentials 服务）
-- `inputModalities: ['text']` 声明后 dsh-llm 运行时自动剥离图片（`projectImagesForTextModel`，dsh-llm index.js adapterStream）→ 消息转换无图片负担
+- `inputModalities` 必须**按模型如实上报**（v1.0.9 起，来源为 models.dev `modalities.input`；声明缺失时保持 `['text']`）。上报 text-only 时 dsh-llm 会在 `adapterStream` 里用 `projectImagesForTextModel` 自动剥离图片（dsh-llm index.js:2311），消息转换无图片负担；上报 `['text','image']` 时图片块原样交给适配器，需自行经 `ctx.attachments` 取字节。注意只有 text/image 可上报：`FileBlock` 对所有路由被无条件投影为句柄文本，video/pdf/audio 无法投递
 - pi-ai `Model` 接口（types.d.ts:637）：`{id, name, api, provider, baseUrl, reasoning, input, cost, contextWindow, maxTokens, headers?, compat?}`，目录构造目标
 - pi-ai `Context`：`{systemPrompt?, messages, tools?}`；`Message = UserMessage | AssistantMessage | ToolResultMessage`；内容块 `text | thinking | toolCall | image`
 - chunk 输出词汇表（dsh-llm-pi-ai toStreamChunks，index.js:1342-1420 逐条核实）：`block-start{text|reasoning|tool-call}` / `text-delta` / `reasoning-delta` / `tool-call-delta` / `block-end` / `usage` / `finish{reason, replayState?}`，流必须以 usage+finish 终止
@@ -71,6 +71,12 @@ full 版不再依赖 T0 结论（动态头已由 pi-ai 每请求 options 解决�
 | 1.8 | 单测矩阵（ids 对齐 Go 单测；Decide 五类输入；events 用例逐条对齐 toStreamChunks） | agent/internal/* 既有测试 | 含上 |
 
 合计约 1100 行（此前估 650-800 偏乐观；转换层 messages/events 是读源码后修正的真实量级）。
+
+**1.0.9 增补**：`adapter/images.ts`（请求图几何预算、base64 记账、offload 算术、占位文本，
+净室对照 dsh-llm content.ts + dsh-attachment request-projection.ts，独立保留副本以便宿主包
+缺失时插件仍可导入）；`catalog` 增 `harnessInputModalities` / `inputModalities`；
+`messages.ts` 增图片路径（保留句柄文本 + 真实字节，工具结果内嵌图片递归收集）；
+`zen-adapter` 增附件服务惰性解析与 `effortWireIsRefusable` 重发。
 
 ### T2 — provider 注册迁移
 
@@ -105,3 +111,6 @@ T3 分发形态切换（market 包不含 agent 二进制与看护代码；
 - 不做多协议（Responses/Anthropic）——与 Go 版同一决策
 - 不做 proxy 池/多出口——同一合规收缩（design.md §9.2）
 - 不做 WebUI/多实例——同上
+- 不做 video / PDF / 音频输入——宿主只有 `ImageBlock` 一种二进制模态，`FileBlock`
+  对所有路由被无条件投影为句柄文本（`projectFilesToText`），任何适配器都无法绕过
+  （详见 design.md §4.1「输入模态的上报边界」）

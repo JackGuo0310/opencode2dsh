@@ -151,7 +151,7 @@ DSH                opencode2dsh-agent (Go)                opencode.ai/zen
 | 优先级 | 来源 | 内容 | 刷新 |
 | --- | --- | --- | --- |
 | S1 动态主源 | `GET https://opencode.ai/zen/v1/models`（`Authorization: Bearer public`，models.go:587-618 `fetchModels`） | Zen 上当前在售模型全集（含免费与付费，**不含 allowAnonymous 标记**） | 默认 300s（复用 `models.refresh_seconds`） |
-| S2 免费判定 | `GET https://models.dev/api.json`（model_metadata.go:21 `modelsDevDefaultURL`，24h 刷新，带磁盘缓存 `config.json.models.dev.json`） | 每模型 `input_cost`/`output_cost`/`deprecated` → `Decide()` 判定免费 | 24h + 启动时读缓存 |
+| S2 免费判定 | `GET https://models.dev/api.json`（model_metadata.go:21 `modelsDevDefaultURL`，24h 刷新，带磁盘缓存 `config.json.models.dev.json`） | 每模型 `input_cost`/`output_cost`/`deprecated` → `Decide()` 判定免费；另供 `limit.context/output`（窗口）、`reasoning`/`reasoning_options`（思考档位）、`modalities.input`（输入模态） | 24h + 启动时读缓存 |
 | S3 静态兜底 | 编译期嵌入的模型清单（Go 常量表） | 已知可用匿名模型 id 列表（以 Phase 0 实测为准填充；预置 `gpt-oss-120b`、`gpt-oss-20b`、`deepseek-v4-flash`、`qwen3-coder-480b` 等，**以实测为准，交付前校准**） | 随版本发布更新 |
 
 判定逻辑（`modelMetadataStore.Decide`，model_metadata.go:192-237）：
@@ -162,6 +162,13 @@ Allowed = isFreeModel(id)                       // 名称含 "free"，模型缺�
 ```
 
 `/v1/models` 端点输出 = S1 ∩ S2（或 S2 未就绪时 S1 ∩ S3），即：**在售 ∧ 判定为免费**才对外暴露（gateway.go:196-210 `handleModels` 已实现该过滤）。
+
+**输入模态的上报边界（v1.0.9 起）**：S2 的 `modalities.input` 只放行 `text` 与 `image`。
+models.dev 上部分免费模型另声明 `video` / `pdf` / `audio`（如 `muse-spark-1.3-contributor-free`），
+但 DSH 宿主只有 `ImageBlock` 一种二进制模态，`FileBlock` 在 `dsh-llm` 核心里对**所有**路由
+无条件投影为句柄文本（`projectFilesToText`），适配器无法绕过。少报只会在挂载前拒绝图片，
+多报会让上游在消息已落库后才报错——按 dsh-llm 的取向上报宿主能投递的模态。
+声明缺失时**保持纯文本**（`harnessInputModalities(undefined) === ['text']`）。
 
 ### 4.2 失败回退链
 
@@ -342,7 +349,9 @@ opencode2dsh/
 | --- | --- | --- |
 | R1 | OpenCode 调整匿名通道（改凭证/缩白名单/取消） | S1 动态目录 + healthz `degraded` 让故障可见；README 明示该依赖关系。代码上把 `anonymousZenKey` 与上游 URL 收敛为单一常量便于跟进 |
 | R2 | 插件分发环境禁止原生二进制 | 兜底链：预编译包 → 本机 Go 编译 → 明确报错并给编译指引（§8.4） |
-| R3 | models.dev 判定与上游 `allowAnonymous` 不一致（判定免费但上游拒绝） | 400/403 透传给 DSH（§6.2），DSH 可切换模型；S3 清单只收录实测通过条目，降低误报面 |
+| R3 | models.dev 判定与上游 `allowAnonymous` 不一致（判定免费但上游拒绝） | 400/403 透传给 DSH（§6.2），DSH 可切换模型；S3 清单只收录实测通过条目，降低误报面。实测 2026-09-24：`kimi-k2.5-free`/`minimax-m3-free` 为 401 not supported，`mimo-v2.6-flash-free`/`big-pickle` 为 403，free tier 实际只放行 `space-bunny-free` |
+| R6 | models.dev 声明的能力上游未真正开放 | 图片实测 2026-09-24：`image_url` data URI / 远程 URL / 伪造 data URI 一律 400，同 body 去图即 200；且 `space-bunny-free` 在 `/responses` 为 401（仅 chat）。管线本身正确且有单测，拦住的是上游。`harnessInputModalities` 只放行宿主能投递的 text/image（§4.1）；如实上报优于谎报，但上游未开放期间图片回合会 400，已在 CHANGELOG/README 明示 |
+| R7 | 上游静默下线请求字段取值 | 实测 2026-09-24：`reasoning_effort` 的 `none`（自 1.0.7 起 Off 档所发）与 `off` 均为 400，而 `minimal\|low\|medium\|high\|xhigh\|max` 仍 200。`off` 改为不注入字段；兜底 `effortWireIsRefusable` 在 400 且点名该字段时丢弃重发一次（401/403/429 排除——那属出口/通道，换 IP 修不了 schema 错误） |
 | R4 | 端口冲突/防火墙 | 随机端口（`127.0.0.1:0`）为主；回环监听通常不受出站防火墙影响 |
 | R5 | 上游 SSE 语义变化 | Phase 0 验收含流式用例；`TeeReader` 透传路径对上游变化最不敏感（不做转换） |
 | 开放 Q1 | DSH provider 注册 API 的确切形态（静态配置 or 插件动态注入模型清单） | Phase 1 第一步核实 DSH 侧 provider 配置协议后再定 provider.ts 的实现方式；不影响 agent 设计 |
