@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.0.9 (2026-09-24)
+
+**新增：免费模型的图片能力真正打通了。此前所有模型都被硬编码为纯文本，DSH 会在派发前把图片剥离，Space Bunny 这类多模态免费模型的看图能力完全用不上。**
+
+> **实测提醒（2026-09-24）：Zen 免费通道目前会硬拒绝一切图片内容。** 本版本
+> 默认按 models.dev 声明上报 image 能力，但当天实测：`image_url` data URI、
+> 远程 https URL、甚至伪造的 `data:text/plain` 一律 `400 invalid_request_error`，
+> 同一请求体去掉图片即 200。也就是说图片管线本身是通的，拦住的是上游。出现
+> 图片回合 400 时先看这里；一旦上游放开，本版本无需改动即可工作。
+
+### Added
+
+- **目录如实上报输入模态。** catalog 解析 models.dev 的
+  `modalities.input` 与 `attachment`，`listModels` / `resolveModel` 按模型
+  回报真实 `inputModalities`，pi-ai wire model 的 `input` 同步放开
+  （pi-ai 自己就用这个字段决定是否序列化图片）。
+  - 声明了 `image` 的免费模型（space-bunny-free、kimi-k2.5-free、
+    minimax-m3-free、mimo-v2.6-flash-free 等）在 DSH 里现在可以看图。
+  - 元数据缺失或 id 不存在时**保持纯文本**：少报会在图片挂载前就拒绝，
+    多报会让上游在消息已落库后才报错。
+- **图片走真实字节。** `src/adapter/images.ts` 是 dsh-llm 请求图表面
+  （几何预算、base64 记账、offload 算术、占位文本）的独立实现，保留一份
+  副本以便宿主包缺失时插件仍可导入。适配器通过 `ctx.attachments` 惰性解析
+  请求版本字节（服务晚于注册挂载也能恢复），每张图发出「句柄文本 + 真实
+  图片」，pi-ai 转成 `image_url` data URI。纯文本会话序列化结果与之前
+  逐字节一致。
+- **工具返回的图片同样可传。** 图片块会在工具结果里递归收集，字节读取、
+  请求预算、offload 判定三处口径一致。
+- **请求图预算可配。** `maxRequestImageBytes`（默认 20MiB，base64 口径）、
+  `requestImagePixelBudget`（默认 2048×2048）、`requestImageMaxBytes`
+  （默认 1MiB）、`maxRequestImages`（默认 32）。超限时抛宿主
+  `IMAGE_OFFLOAD_REQUIRED` 失败码，由 `dsh-compaction-image-offload`
+  卸载最旧图片后重试，而不是插件自行丢弃。
+- **附件服务缺失时明确报错。** 路由声明了 image 能力却没有附件服务时，
+  回合以 `UNSUPPORTED_CONTENT` 失败，不静默吞掉用户附的图。
+
+### 已知问题（1.0.7 起存在，本次不修）
+
+选思考等级 **Off** 时插件会发送 `reasoning_effort: "none"`，而 2026-09-24 实测
+上游已拒绝该取值（`400 invalid_request_error`），选 Off 的回合整体失败；`low`
+等其他档位正常。该行为自 1.0.7 引入（原为实测有效的取值），已单独记录跟踪。
+
+### 视频 / PDF / 音频：明确不支持
+
+models.dev 上部分免费模型确实声明了 `video`、`pdf`、`audio`
+（muse-spark-1.3-contributor-free、mimo-v2-omni-free 等），但 DSH 宿主
+只有 `ImageBlock` 一种二进制模态，`FileBlock` 在 `dsh-llm` 核心里对**所有**
+路由无条件投影成文本句柄，适配器无法绕过。catalog 因此只放行
+`text` / `image`——如实上报宿主能投递的模态，而不是让用户在模型选择器里
+看到一个点了就会失败的选项。视频/PDF/音频附件仍会以只读路径句柄交给模型
+自行读取。
+
 ## 1.0.2 (2026-09-23)
 
 **修复:客户端半边不再在模块级依赖 `settingsScope`,避免 DSH 0.1.7-alpha 上启动失败。**

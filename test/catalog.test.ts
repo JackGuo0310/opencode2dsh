@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { gzipSync, zstdCompressSync } from 'node:zlib'
-import { decodeModelsDev, decide, fetchZenModels, isFreeModel, ModelCatalog, staticFreeModels } from '../src/adapter/catalog.ts'
+import { decodeModelsDev, decide, fetchZenModels, harnessInputModalities, isFreeModel, ModelCatalog, staticFreeModels } from '../src/adapter/catalog.ts'
 import { opencodeUserAgent } from '../src/adapter/ids.ts'
 
 function price(input?: number, output?: number, deprecated = false, reasoning = false) {
@@ -136,6 +136,71 @@ test('decodeModelsDev extracts the reasoning flag and declared effort ladders', 
   assert.deepEqual(prices.get('plain-free'), price(0, 0, false, true))
   assert.deepEqual(prices.get('dumb-free'), price(0, 0))
   assert.deepEqual(prices.get('mystery-free'), price(0, 0))
+})
+
+test('harnessInputModalities keeps only what the harness can transport', () => {
+  // the live Space Bunny declaration: image survives, video/pdf/audio do not
+  assert.deepEqual(harnessInputModalities(['text', 'image', 'video']), ['text', 'image'])
+  assert.deepEqual(harnessInputModalities(['text', 'image', 'video', 'pdf', 'audio']), ['text', 'image'])
+  assert.deepEqual(harnessInputModalities(['text']), ['text'])
+  // a declaration that omits text is still text-plus, never image-only
+  assert.deepEqual(harnessInputModalities(['image']), ['text', 'image'])
+  assert.deepEqual(harnessInputModalities([]), ['text'])
+  assert.deepEqual(harnessInputModalities(undefined), ['text'])
+  // casing and duplicates normalize
+  assert.deepEqual(harnessInputModalities(['TEXT', 'Image', 'image']), ['text', 'image'])
+})
+
+test('decodeModelsDev reads the modalities and attachment declarations', () => {
+  const payload = {
+    opencode: {
+      models: {
+        // live shape (2026-09-24): Space Bunny declares video too
+        'space-bunny-free': {
+          cost: { input: 0, output: 0 },
+          modalities: { input: ['text', 'image', 'video'], output: ['text'] },
+          attachment: true,
+        },
+        'text-free': { cost: { input: 0, output: 0 }, modalities: { input: ['text'] }, attachment: false },
+        // pre-modality metadata: the fields stay absent so the caller keeps
+        // its own text-only default
+        'legacy-free': { cost: { input: 0, output: 0 } },
+      },
+    },
+  }
+  const prices = decodeModelsDev(payload)
+  assert.deepEqual(prices.get('space-bunny-free'), { ...price(0, 0), inputModalities: ['text', 'image'], attachment: true })
+  assert.deepEqual(prices.get('text-free'), { ...price(0, 0), inputModalities: ['text'], attachment: false })
+  assert.deepEqual(prices.get('legacy-free'), price(0, 0))
+})
+
+test('ModelCatalog.inputModalities reads the parsed metadata', async () => {
+  const catalog = new ModelCatalog({
+    fetchImpl: fakeFetch({
+      'https://opencode.ai/zen/v1/models': zenBody,
+      'https://models.dev/api.json': {
+        opencode: {
+          models: {
+            'vision-free': {
+              cost: { input: 0, output: 0 },
+              modalities: { input: ['text', 'image', 'video'] },
+            },
+            'text-free': { cost: { input: 0, output: 0 }, modalities: { input: ['text'] } },
+            'legacy-free': { cost: { input: 0, output: 0 } },
+          },
+        },
+      },
+    }),
+  })
+  try {
+    await catalog.refreshOnce()
+    assert.deepEqual(catalog.inputModalities('vision-free'), ['text', 'image'])
+    assert.deepEqual(catalog.inputModalities('text-free'), ['text'])
+    assert.equal(catalog.inputModalities('legacy-free'), undefined, 'no declaration = caller default')
+    assert.equal(catalog.inputModalities('absent-model'), undefined)
+  } finally {
+    catalog.stop()
+  }
 })
 
 test('ModelCatalog.reasoningCapability reads the parsed metadata', async () => {

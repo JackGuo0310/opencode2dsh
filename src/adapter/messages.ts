@@ -1,8 +1,27 @@
 /**
  * Harness GenerateOptions -> pi-ai Context conversion (clean-room version of
- * dsh-llm-pi-ai's textOnlyContext, scoped to text-only models: dsh-llm strips
- * images before dispatch when the model declares text-only input modalities).
+ * dsh-llm-pi-ai's context conversion, covering both its text-only and
+ * image-resolving paths).
+ *
+ * Which path runs is the adapter's decision, not the harness's: dsh-llm already
+ * projected every image to placeholder text when the resolved model declares
+ * text-only input modalities, so any image block that survives here belongs to
+ * a model the route declared image-capable and must go upstream as real bytes.
  */
+
+import {
+  offloadedImageText,
+  requestImageHandleText,
+  requiredImageOffload,
+  requestImageTarget,
+  type ImageAccess,
+  type ImageOccurrence,
+  type ImageRef,
+  type RequestImageVersion,
+} from './images.ts'
+
+/** Stable failure code the host's image-offload plugin retries on. */
+export const IMAGE_OFFLOAD_REQUIRED_CODE = 'IMAGE_OFFLOAD_REQUIRED'
 
 export interface HarnessTool {
   name: string
@@ -14,7 +33,7 @@ export type HarnessBlock =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'tool-call'; id: string; name: string; arguments: string }
-  | { type: 'image'; [key: string]: unknown }
+  | { type: 'image'; attachment: ImageRef; offloaded?: true; [key: string]: unknown }
   | { type: 'tool-result'; toolCallId: string; content: HarnessBlock[]; isError?: boolean; [key: string]: unknown }
 
 export interface HarnessMessage {
@@ -38,7 +57,7 @@ export interface HarnessGenerateOptions {
 
 /** pi-ai message vocabulary (subset we emit). */
 export type PiMessage =
-  | { role: 'user'; content: string; timestamp: number }
+  | { role: 'user'; content: string | PiContentBlock[]; timestamp: number }
   | {
       role: 'assistant'
       content: PiAssistantBlock[]
@@ -114,6 +133,9 @@ function toPiAssistant(message: HarnessMessage, providerId: string): Extract<PiM
         content.push({ type: 'toolCall', id: block.id, name: block.name, arguments: parseArguments(block.arguments) })
         break
       case 'image':
+        // Assistant-side image output is forward compatibility in the harness
+        // vocabulary; no current adapter declares it, and pi-ai has no
+        // assistant image block to replay into.
         throw new Error('opencode2dsh: assistant image output cannot be replayed to a text-only model')
       default:
         break
@@ -132,6 +154,22 @@ function toPiAssistant(message: HarnessMessage, providerId: string): Extract<PiM
   }
 }
 
+/** Anything in typed content carrying a durable image reference. */
+export function contentHasImage(content: readonly unknown[]): boolean {
+  for (const block of content) {
+    const candidate = block as { type?: unknown; attachment?: unknown }
+    if (candidate?.type === 'image' && candidate.attachment !== undefined) return true
+  }
+  return false
+}
+
+export function anyMessageHasImage(messages: readonly HarnessMessage[]): boolean {
+  for (const message of messages) {
+    if (contentHasImage(message.content)) return true
+  }
+  return false
+}
+
 function flattenText(message: HarnessMessage): string {
   return message.content
     .filter((block) => block.type === 'text')
@@ -145,19 +183,199 @@ function toolResultText(blocks: HarnessBlock[]): string {
     .join('')
 }
 
+function isImageBlock(block: HarnessBlock): block is Extract<HarnessBlock, { type: 'image' }> {
+  return block.type === 'image' && (block as { attachment?: unknown }).attachment !== undefined
+}
+
 /**
- * Convert the harness conversation into a pi-ai Context. Mirrors
- * textOnlyContext: text-only user content, tool results as toolResult
- * messages, assistant history as pi-ai assistant messages.
+ * Walk one typed content list, descending into tool-result bodies: an image a
+ * tool returned is as transportable as one the user attached, and both cost the
+ * same request bytes.
  */
-export function toPiContext(options: HarnessGenerateOptions): PiContext {
-  const providerId = options.provider
+function visitImageBlocks(blocks: readonly HarnessBlock[], visit: (block: Extract<HarnessBlock, { type: 'image' }>) => void): void {
+  for (const block of blocks) {
+    if (isImageBlock(block)) visit(block)
+    else if (block.type === 'tool-result') visitImageBlocks(block.content, visit)
+  }
+}
+
+/** The durable attachment service seam the image path resolves bytes through. */
+export interface ImageRequestContext {
+  attachments: {
+    readImageRequest(ref: ImageRef, target: { width: number; height: number; maxBytes: number }, signal?: AbortSignal): Promise<RequestImageVersion>
+  }
+  /** Resolve the read-only execution-world path for one durable reference. */
+  resolveImageAccess?: (ref: ImageRef) => ImageAccess | undefined
+  /** Request-level bound on the base64 payload of retained images. */
+  maxRequestImageBytes?: number
+  /** Per-image geometry and encoded-byte budget. */
+  requestImagePolicy?: { maxPixels: number; maxBytes: number }
+  /** Occurrence cap; absent leaves the count unbounded. */
+  maxRequestImages?: number
+}
+
+/** One image block prepared for the wire, with the text that describes it. */
+interface PreparedImage {
+  text: string
+  image: { type: 'image'; data: string; mimeType: string }
+  /** Raw encoded length of the request version, before base64 expansion. */
+  versionBytes: number
+}
+
+async function prepareRequestImages(
+  messages: readonly HarnessMessage[],
+  images: ImageRequestContext,
+  signal: AbortSignal | undefined,
+): Promise<Map<string, PreparedImage>> {
+  const refs = new Map<string, ImageRef>()
+  for (const message of messages) {
+    visitImageBlocks(message.content, (block) => {
+      if (block.offloaded === true) return
+      refs.set(block.attachment.attachmentId, block.attachment)
+    })
+  }
+  const policy = images.requestImagePolicy ?? { maxPixels: 2048 * 2048, maxBytes: 1024 * 1024 }
+  const prepared = new Map<string, PreparedImage>()
+  await Promise.all(
+    [...refs.values()].map(async (ref) => {
+      const version = await images.attachments.readImageRequest(ref, requestImageTarget(ref, policy), signal)
+      prepared.set(ref.attachmentId, {
+        text: requestImageHandleText(ref, version, images.resolveImageAccess?.(ref)),
+        image: { type: 'image', data: Buffer.from(version.data).toString('base64'), mimeType: version.mediaType },
+        versionBytes: version.bytes,
+      })
+    }),
+  )
+  return prepared
+}
+
+/** Typed content -> pi-ai user/tool-result content. A retained image becomes
+ * its handle text plus real bytes; an offloaded one becomes placeholder text
+ * alone. Pure text collapses to the plain string form the wire prefers, so a
+ * text-only conversation serializes exactly as it did before. */
+function userContent(
+  blocks: readonly HarnessBlock[],
+  prepared: Map<string, PreparedImage> | undefined,
+  resolveImageAccess: ((ref: ImageRef) => ImageAccess | undefined) | undefined,
+): string | PiContentBlock[] {
+  const content = typedUserContent(blocks, prepared, resolveImageAccess)
+  return content.every((block) => block.type === 'text') ? content.map((block) => block.text).join('') : content
+}
+
+/** Same walk, without the string collapse: tool results always carry blocks.
+ *
+ * `descendToolResults` separates the two call sites. At message level a
+ * tool-result block is a sibling message's content, so flattening its text here
+ * would duplicate it as a user turn; inside a tool result, a nested result's
+ * text is part of the same payload. */
+function typedUserContent(
+  blocks: readonly HarnessBlock[],
+  prepared: Map<string, PreparedImage> | undefined,
+  resolveImageAccess: ((ref: ImageRef) => ImageAccess | undefined) | undefined,
+  descendToolResults = false,
+): PiContentBlock[] {
+  const content: PiContentBlock[] = []
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (block.text.length > 0) content.push({ type: 'text', text: block.text })
+      continue
+    }
+    if (block.type === 'tool-result') {
+      // The tool result's own message carries this content separately; a nested
+      // result's text is flattened exactly as the text-only path flattens it.
+      if (!descendToolResults) continue
+      const nested = toolResultText(block.content)
+      if (nested.length > 0) content.push({ type: 'text', text: nested })
+      continue
+    }
+    if (!isImageBlock(block)) continue
+    if (block.offloaded === true) {
+      content.push({ type: 'text', text: offloadedImageText(block.attachment, resolveImageAccess?.(block.attachment)) })
+      continue
+    }
+    const version = prepared?.get(block.attachment.attachmentId)
+    if (!version) continue
+    content.push({ type: 'text', text: version.text })
+    content.push(version.image)
+  }
+  return content
+}
+
+/** Replace every offloaded occurrence in the history with its placeholder. */
+function projectOffloadedImages(
+  messages: readonly HarnessMessage[],
+  placeholder: (ref: ImageRef) => string,
+): HarnessMessage[] {
+  if (!messages.some((message) => hasOffloaded(message.content))) return [...messages]
+  return messages.map((message) => {
+    if (!hasOffloaded(message.content)) return message
+    return { ...message, content: replaceOffloaded(message.content, placeholder) }
+  })
+}
+
+function hasOffloaded(blocks: readonly HarnessBlock[]): boolean {
+  let found = false
+  visitImageBlocks(blocks, (block) => {
+    if (block.offloaded === true) found = true
+  })
+  return found
+}
+
+function replaceOffloaded(blocks: readonly HarnessBlock[], placeholder: (ref: ImageRef) => string): HarnessBlock[] {
+  return blocks.map((block) => {
+    if (isImageBlock(block)) {
+      return block.offloaded === true ? { type: 'text' as const, text: placeholder(block.attachment) } : block
+    }
+    if (block.type === 'tool-result' && hasOffloaded(block.content)) {
+      return { ...block, content: replaceOffloaded(block.content, placeholder) }
+    }
+    return block
+  })
+}
+
+/** An error the host's image-offload plugin recognises and retries on. */
+export class ImageOffloadRequiredError extends Error {
+  readonly failure: { message: string; code: string; offloadImages: number }
+
+  constructor(maxBytes: number, offloadImages: number) {
+    super(
+      `opencode2dsh request images exceed the ${maxBytes}-byte base64 bound; ${offloadImages} more oldest occurrence(s) must be offloaded.`,
+    )
+    this.failure = { message: this.message, code: IMAGE_OFFLOAD_REQUIRED_CODE, offloadImages }
+  }
+}
+
+/**
+ * Convert the harness conversation into a pi-ai Context.
+ *
+ * Text-only path: user content collapses to a plain string, tool results become
+ * toolResult messages, assistant history replays as pi-ai assistant messages.
+ *
+ * Image path (only reached when the route declared image input): durable
+ * attachments are resolved to request versions first, the request-wide base64
+ * bound is checked, and every retained occurrence ships as handle text plus
+ * real image bytes.
+ */
+export function toPiContext(options: HarnessGenerateOptions): PiContext
+export function toPiContext(options: HarnessGenerateOptions, images: ImageRequestContext): Promise<PiContext>
+export function toPiContext(options: HarnessGenerateOptions, images?: ImageRequestContext): PiContext | Promise<PiContext> {
+  if (images === undefined) return toTextOnlyPiContext(options)
+  return toImagePiContext(options, images)
+}
+
+function assemble(
+  options: HarnessGenerateOptions,
+  providerId: string,
+  messages: readonly HarnessMessage[],
+  contentOf: (message: HarnessMessage) => string | PiContentBlock[] | null,
+  toolContentOf: (result: Extract<HarnessBlock, { type: 'tool-result' }>) => PiContentBlock[],
+): PiContext {
   const toolNames = new Map<string, string>()
-  const messages: PiMessage[] = []
-  for (const message of options.messages) {
+  const converted: PiMessage[] = []
+  for (const message of messages) {
     if (message.role === 'system') {
       const text = flattenText(message)
-      if (text.length > 0) messages.push({ role: 'user', content: text, timestamp: 0 })
+      if (text.length > 0) converted.push({ role: 'user', content: text, timestamp: 0 })
       continue
     }
     if (message.role === 'assistant') {
@@ -165,32 +383,70 @@ export function toPiContext(options: HarnessGenerateOptions): PiContext {
       for (const block of assistant.content) {
         if (block.type === 'toolCall') toolNames.set(block.id, block.name)
       }
-      messages.push(assistant)
+      converted.push(assistant)
       continue
     }
-    const text = flattenText(message)
-    const results = message.content.filter((block) => block.type === 'tool-result') as Array<
-      Extract<HarnessBlock, { type: 'tool-result' }>
-    >
-    if (text.length > 0 || results.length === 0) {
-      messages.push({ role: 'user', content: text, timestamp: 0 })
+    const text = contentOf(message)
+    // null = this turn has no user text of its own (a pure tool-result turn);
+    // its whole content is the toolResult messages that follow.
+    if (text !== null && (typeof text === 'string' ? text.length > 0 : true)) {
+      converted.push({ role: 'user', content: text, timestamp: 0 })
     }
-    for (const result of results) {
-      messages.push({
+    for (const block of message.content) {
+      if (block.type !== 'tool-result') continue
+      converted.push({
         role: 'toolResult',
-        toolCallId: result.toolCallId,
-        toolName: toolNames.get(result.toolCallId) ?? 'unknown',
-        content: [{ type: 'text', text: toolResultText(result.content) || '(no output)' }],
-        isError: result.isError ?? false,
+        toolCallId: block.toolCallId,
+        toolName: toolNames.get(block.toolCallId) ?? 'unknown',
+        content: toolContentOf(block),
+        isError: block.isError ?? false,
         timestamp: 0,
       })
     }
   }
-  const context: PiContext = { messages }
+  const context: PiContext = { messages: converted }
   if (typeof options.system === 'string' && options.system.length > 0) context.systemPrompt = options.system
   const tools = options.tools?.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
   if (tools && tools.length > 0) context.tools = tools
   return context
+}
+
+function toTextOnlyPiContext(options: HarnessGenerateOptions): PiContext {
+  return assemble(
+    options,
+    options.provider,
+    options.messages,
+    (message) => {
+      const text = flattenText(message)
+      const results = message.content.filter((block) => block.type === 'tool-result')
+      // A turn carrying only tool results has no user text of its own; the
+      // toolResult messages that follow are its whole content.
+      return results.length === 0 || text.length > 0 ? text : null
+    },
+    (result) => [{ type: 'text', text: toolResultText(result.content) || '(no output)' }],
+  )
+}
+
+async function toImagePiContext(options: HarnessGenerateOptions, images: ImageRequestContext): Promise<PiContext> {
+  const resolveImageAccess = images.resolveImageAccess
+  const prepared = await prepareRequestImages(options.messages, images, options.signal)
+  const maxBytes = images.maxRequestImageBytes
+  if (maxBytes !== undefined) {
+    const offload = requiredImageOffload(
+      options.messages,
+      { maxBytes, ...(images.maxRequestImages === undefined ? {} : { maxImages: images.maxRequestImages }) },
+      (block) => prepared.get(block.attachment.attachmentId)?.versionBytes ?? 0,
+    )
+    if (offload > 0) throw new ImageOffloadRequiredError(maxBytes, offload)
+  }
+  const exact = projectOffloadedImages(options.messages, (ref) => offloadedImageText(ref, resolveImageAccess?.(ref)))
+  return assemble(
+    options,
+    options.provider,
+    exact,
+    (message) => userContent(message.content, prepared, resolveImageAccess),
+    (result) => typedUserContent(result.content, prepared, resolveImageAccess, true),
+  )
 }
 
 /**

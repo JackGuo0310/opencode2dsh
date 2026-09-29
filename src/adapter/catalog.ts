@@ -56,6 +56,33 @@ interface ModelPrice {
   contextWindow?: number
   /** models.dev `limit.output`: the model's real max output tokens. */
   maxOutput?: number
+  /** models.dev `modalities.input`: the accepted input types, verbatim. */
+  inputModalities?: string[]
+  /** models.dev `attachment`: the model accepts file attachments. */
+  attachment?: boolean
+}
+
+/**
+ * Modality vocabulary the harness can actually carry to a provider. The host
+ * defines exactly these two (dsh-llm ModelModalityMap) and projects every other
+ * binary type — video, PDF, audio — to handle text before an adapter sees it,
+ * so a models.dev declaration of `video` or `pdf` is real upstream capability
+ * the harness cannot transport. Reporting it here would be a lie the picker
+ * would act on, so only text and image survive the projection.
+ */
+const HARNESS_INPUT_MODALITIES = new Set(['text', 'image'])
+
+/** Declared input modalities narrowed to what the harness can deliver. */
+export function harnessInputModalities(declared: string[] | undefined): string[] {
+  const out: string[] = []
+  for (const modality of declared ?? []) {
+    const normalized = String(modality).trim().toLowerCase()
+    if (!HARNESS_INPUT_MODALITIES.has(normalized) || out.includes(normalized)) continue
+    out.push(normalized)
+  }
+  // Text is the floor every route certainly carries; a declaration that omits
+  // it is still text-plus, never image-only.
+  return out.includes('text') ? out : ['text', ...out]
 }
 
 /** Decide (model_metadata.go Decide, ported with the deprecation fix).
@@ -135,11 +162,27 @@ export function decodeModelsDev(data: unknown): Map<string, ModelPrice> {
         // Omitted when absent so caches written before limits existed stay valid.
         ...(contextWindow !== undefined ? { contextWindow } : {}),
         ...(maxOutput !== undefined ? { maxOutput } : {}),
+        ...decodeInputModalities(raw),
       })
     }
     if (result.size > 0) return result
   }
   return result
+}
+
+/**
+ * models.dev `modalities.input` (live shape 2026-09-24: the free lane declares
+ * e.g. ["text","image","video"]) and the `attachment` flag. Omitted entirely
+ * when the field is absent so cached pre-modality metadata stays structurally
+ * valid and the caller keeps its text-only default.
+ */
+function decodeInputModalities(model: Record<string, unknown>): { inputModalities?: string[]; attachment?: boolean } {
+  const declared = (model.modalities as { input?: unknown } | undefined)?.input
+  const modalities = Array.isArray(declared) ? harnessInputModalities(declared as string[]) : undefined
+  return {
+    ...(modalities !== undefined ? { inputModalities: modalities } : {}),
+    ...(typeof model.attachment === 'boolean' ? { attachment: model.attachment } : {}),
+  }
 }
 
 function metadataDeprecated(model: Record<string, unknown>): boolean {
@@ -363,6 +406,18 @@ export class ModelCatalog {
     const price = this.#prices.get(model)
     if (!price) return undefined
     return { reasoning: price.reasoning === true, effortValues: price.effortValues ?? [] }
+  }
+
+  /**
+   * Input modalities the harness can deliver to this model, narrowed from the
+   * models.dev declaration. undefined when the metadata cannot speak for the
+   * model (pending, or id absent) — the caller then keeps its text-only
+   * default, which under-claims rather than admitting a turn the provider
+   * would reject mid-stream.
+   */
+  inputModalities(model: string): string[] | undefined {
+    const price = this.#prices.get(model)
+    return price?.inputModalities
   }
 
   /** healthz models block (design.md 6.1). */

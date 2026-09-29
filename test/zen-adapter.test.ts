@@ -230,6 +230,76 @@ test('stream builds the pi-ai wire model with the catalog limits', async () => {
   assert.equal(seen?.maxTokens, 8192)
 })
 
+test('resolveModel advertises the real modalities from the catalog', () => {
+  const catalog = (inputModalities?: (model: string) => string[] | undefined) => ({
+    list: () => ['space-bunny-free', 'big-pickle'],
+    decision: () => ({ allowed: true, source: 'test', known: true }),
+    reasoningCapability: () => undefined,
+    ...(inputModalities ? { inputModalities } : {}),
+  })
+  // declared image input reaches both the picker catalog and the route
+  const declared = catalog((model) => (model === 'space-bunny-free' ? ['text', 'image'] : ['text']))
+  const adapter = new ZenAdapter(declared)
+  assert.deepEqual(adapter.resolveModel('opencode2dsh', 'space-bunny-free').inputModalities, ['text', 'image'])
+  assert.deepEqual(adapter.resolveModel('opencode2dsh', 'big-pickle').inputModalities, ['text'])
+  assert.deepEqual(adapter.listModels('opencode2dsh').map((m) => [m.id, m.inputModalities]), [
+    ['space-bunny-free', ['text', 'image']],
+    ['big-pickle', ['text']],
+  ])
+
+  // absent member, or a model the metadata cannot speak for: text only
+  const bare = new ZenAdapter(catalog())
+  assert.deepEqual(bare.resolveModel('opencode2dsh', 'space-bunny-free').inputModalities, ['text'])
+})
+
+test('an image-capable model reaches pi-ai with image input enabled', async () => {
+  let seen: { input?: string[] } | undefined
+  const provider = {
+    streamSimple(model: { input?: string[] }, _context: unknown, _options: unknown): AsyncIterable<{ type: string }> {
+      seen = model
+      return (async function* () {
+        yield { type: 'start' }
+        yield { type: 'done', message: { stopReason: 'stop', content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }
+      })()
+    },
+  }
+  const adapter = new ZenAdapter(
+    {
+      list: () => ['space-bunny-free'],
+      decision: () => ({ allowed: true, source: 'test', known: true }),
+      reasoningCapability: () => undefined,
+      inputModalities: () => ['text', 'image'],
+    },
+    { providerOverride: provider },
+  )
+  for await (const chunk of adapter.stream({ provider: 'opencode2dsh', model: 'space-bunny-free', messages: [] })) void chunk
+  assert.deepEqual(seen?.input, ['text', 'image'], 'pi-ai gates its own image serialization on this list')
+})
+
+test('an image turn with no attachment service fails loudly instead of dropping it', async () => {
+  const adapter = new ZenAdapter(
+    {
+      list: () => ['space-bunny-free'],
+      decision: () => ({ allowed: true, source: 'test', known: true }),
+      reasoningCapability: () => undefined,
+      inputModalities: () => ['text', 'image'],
+    },
+    { providerOverride: { streamSimple: () => { throw new Error('must not dispatch') } } },
+  )
+  const chunks: Array<{ type: string; reason?: { kind: string; failure?: { code: string } } }> = []
+  for await (const chunk of adapter.stream({
+    provider: 'opencode2dsh',
+    model: 'space-bunny-free',
+    messages: [{
+      role: 'user',
+      content: [{ type: 'image', attachment: { attachmentId: 'sha256:aa', mediaType: 'image/png', bytes: 1, width: 1, height: 1 } }],
+    }],
+  } as never)) chunks.push(chunk)
+  assert.equal(chunks.length, 1)
+  assert.equal(chunks[0]?.reason?.kind, 'error')
+  assert.equal(chunks[0]?.reason?.failure?.code, 'UNSUPPORTED_CONTENT')
+})
+
 test('isResponsesModel routes muse-spark to responses, everything else to chat', () => {
   for (const id of ['muse-spark-1.3-contributor-free', 'muse-spark-1.2-contributor-free', 'muse-spark-1.2', 'MUSE-SPARK-1.3']) {
     assert.equal(isResponsesModel(id), true, id)

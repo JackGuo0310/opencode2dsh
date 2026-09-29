@@ -25,6 +25,19 @@ export interface Opencode2dshConfig {
   apiKeyEnv?: string
   /** Model list refresh interval in seconds (agent refresh_seconds matches). */
   refreshSeconds?: number
+  /**
+   * Request-image policy (adapter mode, v1.0.9). Only bound turns whose model
+   * declares image input on models.dev; text-only models never see an image
+   * block, because dsh-llm projects them to placeholder text first.
+   */
+  /** Base64 payload bound across one request's retained images (default 20MiB). */
+  maxRequestImageBytes?: number
+  /** Total-pixel budget per image (default 2048*2048). */
+  requestImagePixelBudget?: number
+  /** Encoded-byte target per image before base64 expansion (default 1MiB). */
+  requestImageMaxBytes?: number
+  /** Image occurrences one request may carry (default 32). */
+  maxRequestImages?: number
   /** Restart backoff: initial delay ms. */
   restartDelayMs?: number
   /** Restart backoff: max delay ms. */
@@ -81,13 +94,29 @@ export const defaults = {
   providerId: 'opencode2dsh',
   apiKeyEnv: 'OPENCODE2DSH_TOKEN',
   refreshSeconds: 300,
+  maxRequestImageBytes: 20 * 1024 * 1024,
+  requestImagePixelBudget: 2048 * 2048,
+  requestImageMaxBytes: 1024 * 1024,
+  maxRequestImages: 32,
   restartDelayMs: 1000,
   restartMaxDelayMs: 60000,
   maxConsecutiveCrashes: 5,
 }
 
 export type ResolvedConfig = Required<
-  Pick<Opencode2dshConfig, 'providerId' | 'apiKeyEnv' | 'refreshSeconds' | 'restartDelayMs' | 'restartMaxDelayMs' | 'maxConsecutiveCrashes'>
+  Pick<
+    Opencode2dshConfig,
+    | 'providerId'
+    | 'apiKeyEnv'
+    | 'refreshSeconds'
+    | 'maxRequestImageBytes'
+    | 'requestImagePixelBudget'
+    | 'requestImageMaxBytes'
+    | 'maxRequestImages'
+    | 'restartDelayMs'
+    | 'restartMaxDelayMs'
+    | 'maxConsecutiveCrashes'
+  >
 > & Opencode2dshConfig
 
 export function resolveConfig(config: Opencode2dshConfig = {}): ResolvedConfig {

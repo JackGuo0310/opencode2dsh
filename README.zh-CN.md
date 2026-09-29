@@ -32,6 +32,7 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 - **原生 adapter，无 sidecar**——一个 npm 包，没有子进程、没有二进制、没有本地端口（旧版 Go sidecar 不随包发行，见 `legacy/`）
 - **CLI 同形伪装**——请求携带 OpenCode CLI 的 User-Agent 和整套会话/请求/项目关联头，按会话派生
 - **思考等级可选**——带推理的免费模型在 DSH 模型选择器里出现思考等级选项（模型声明档位的按声明展示，其余提供 Off/Minimal/Low/Medium/High）；Off 向上游发送 `reasoning_effort: "none"` 真正停思考，不选则保持上游默认
+- **有视觉能力的模型真能看图**——元数据声明了 image 输入的免费模型（Space Bunny、kimi-k2.5-free、minimax-m3-free 等）会上报 image 能力并收到真实图片字节；其余模型如实保持纯文本
 - **实时目录 + 三级回退**——上游实时列表 ∩ 元数据判定免费，断网时依次回退到磁盘缓存与已验证的静态名单
 - **自愈能力**——启动期快速重试、周期刷新，并落盘健康快照便于排查
 - **规范的错误呈现**——上游故障（限流、鉴权、超时、传输）以分类的 finish 原因送达 DSH，重试策略始终由 DSH 掌控
@@ -44,7 +45,7 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 **从 npm 安装**：
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.1
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.9
 ```
 
 **从源码安装**（自行打包）：
@@ -83,9 +84,36 @@ dsh plugin --profile web add ./jackguo0310-opencode2dsh-<version>.tgz
 | `mode` | `adapter` | `adapter`：原生 LlmAdapter 直连 Zen。`sidecar`：旧版本地 agent 模式，不随包发行——请从 `legacy/agent` 自行构建并通过 `agentPath` 指定。 |
 | `providerId` | `opencode2dsh` | 在 DSH 中显示的 provider 名称。 |
 | `refreshSeconds` | `300` | 实时目录刷新间隔；定价元数据每 24 小时刷新。 |
+| `maxRequestImageBytes` | `20971520`（20 MiB） | 单次请求内保留图片的 base64 总量上限。超出时以宿主 `IMAGE_OFFLOAD_REQUIRED` 码失败，由 `dsh-compaction-image-offload` 卸载最旧图片后重试。 |
+| `requestImagePixelBudget` | `4194304`（2048²） | 单图总像素预算，超出的源图按比例缩小。 |
+| `requestImageMaxBytes` | `1048576`（1 MiB） | 单图编码字节目标（base64 膨胀前）。 |
+| `maxRequestImages` | `32` | 单次请求可携带的图片数量。 |
 | `agentPath` | 自动解析 | 仅 sidecar：agent 二进制路径。 |
 | `agentArgs` | — | 仅 sidecar：传给 agent 的额外 CLI 参数。 |
 | `restartDelayMs` / `restartMaxDelayMs` / `maxConsecutiveCrashes` | `1000` / `60000` / `5` | 仅 sidecar：重启退避与熔断阈值。 |
+
+## 图片输入
+
+models.dev 元数据声明了 `image` 输入的模型会在 DSH 模型选择器里上报该能力，并
+收到**真实图片字节**——每张附件经宿主持久化附件服务解析，作为 `image_url` data
+URI 随一段简短句柄文本一起发出（句柄文本点明文件名与其只读规范化路径）。目前走
+这条路的免费模型包括 `space-bunny-free`、`kimi-k2.5-free`、
+`minimax-m3-free`、`mimo-v2.6-flash-free`、`qwen3.6-plus-free`；其余免费模型
+如实保持纯文本。
+
+**视频、PDF、音频不支持。** 部分免费模型在上游确实声明了这些模态，但 DSH 宿主
+只承载一种二进制模态（位图），且文件附件对所有路由都会被投影成句柄文本，适配器
+无法绕过。与其上报一个宿主投递不了的能力，目录只放行 `text` 和 `image`。附上
+视频或 PDF 时，模型仍会拿到其路径并可用工具自行读取。
+
+该功能依赖宿主的 `attachments` 服务（`dsh-attachment`）；缺失时图片回合以
+`UNSUPPORTED_CONTENT` 失败，而不是静默丢弃你附的图片。
+
+> **实测状态（2026-09-24）。** Zen 免费通道目前会拒绝**一切**图片内容：
+> `image_url` data URI、远程 https URL、甚至伪造的 `data:text/plain` 一律
+> `400 invalid_request_error`，而同一请求体去掉图片即 200。插件的图片管线本身
+> 正确且有单测覆盖，拦住的是上游。本版本默认上报 image 能力，因此在上游放开前
+> 图片回合会 400；上游放开后无需任何改动即可工作。
 
 ## 工作原理
 
@@ -106,7 +134,8 @@ https://opencode.ai/zen/v1        ← Authorization: Bearer public
 - **会话关联**——session/project id 由会话首条用户消息经 SHA-256 派生
   （同一会话稳定、不可逆推），每个请求再附带一个全新的随机 id，与 CLI 行为一致。
 - **目录回退链**——S1：实时 `GET /v1/models`；S2：models.dev 定价元数据判定
-  "免费"；S3：编译期验证的静态名单。上游故障时由磁盘缓存（约 7 天有效期）兜底。
+  "免费"，并提供上下文窗口、思考档位与输入模态；S3：编译期验证的静态名单。
+  上游故障时由磁盘缓存（约 7 天有效期）兜底。
 - **韧性**——adapter 在启动时立即注册；若首次目录拉取撞上网络尚未就绪
   （VPN/TUN 重连、DNS 等），会以短周期重试（约 1 分钟内），随后转入常规刷新。
 - **sidecar 模式**（`mode: sidecar`，旧版）——拉起本地 Go agent（

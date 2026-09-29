@@ -5,7 +5,7 @@ import * as openaiResponses from '@earendil-works/pi-ai/api/openai-responses'
 import { ModelCatalog, ZEN_BASE_URL } from './catalog.ts'
 import { toStreamChunks, type HarnessChunk, type PiEvent } from './events.ts'
 import { deriveRequestIDs, disguiseHeaders } from './ids.ts'
-import { ensureFreeLaneShape, toPiContext, type HarnessGenerateOptions } from './messages.ts'
+import { ensureFreeLaneShape, toPiContext, anyMessageHasImage, type HarnessGenerateOptions, type PiContext } from './messages.ts'
 import { routingContext, type RoutingContext } from '../pool/dispatcher.ts'
 import { classifyStreamFailure, isRegionBlocked, shouldRotate } from '../pool/rotate.ts'
 
@@ -36,10 +36,35 @@ export interface CatalogLike {
   reasoningCapability(model: string): { reasoning: boolean; effortValues: string[] } | undefined
   /** Optional: models.dev-declared limits; absent catalogs keep the defaults. */
   limits?(model: string): { contextWindow?: number; maxOutput?: number } | undefined
+  /** Optional: models.dev-declared input modalities; absent means text-only. */
+  inputModalities?(model: string): string[] | undefined
+}
+
+/** The durable attachment service the image path resolves request bytes from. */
+export interface AttachmentSeam {
+  readImageRequest(
+    ref: { attachmentId: string; mediaType: string; bytes: number; width: number; height: number; name?: string },
+    target: { width: number; height: number; maxBytes: number },
+    signal?: AbortSignal,
+  ): Promise<{ data: Uint8Array; mediaType: string; bytes: number; width: number; height: number }>
+  imageHostPath?(ref: { attachmentId: string }): string | undefined
 }
 
 const DEFAULT_CONTEXT_WINDOW = 262144
 const DEFAULT_MAX_TOKENS = 32768
+
+/**
+ * The modalities a route advertises to the harness, from the models.dev
+ * declaration when the catalog carries one. Text is always the floor, and an
+ * absent declaration is text-only on purpose: under-claiming refuses an image
+ * before it is attached, while over-claiming admits one the provider rejects
+ * mid-turn after the message is already durable.
+ */
+function inputModalitiesFor(catalog: CatalogLike, model: string): Array<'text' | 'image'> {
+  const declared = catalog.inputModalities?.(model)
+  if (!Array.isArray(declared) || !declared.includes('image')) return ['text']
+  return ['text', 'image']
+}
 
 /** The advertised context window: the models.dev declaration when the
  * metadata speaks, the host default otherwise (pending/absent metadata or a
@@ -172,7 +197,7 @@ export function isResponsesModel(id: string): boolean {
   return String(id ?? '').toLowerCase().startsWith('muse-spark')
 }
 
-function toPiModel(id: string, reasoning: boolean, limits?: { contextWindow?: number; maxOutput?: number }): Model<Api> {
+function toPiModel(id: string, reasoning: boolean, limits?: { contextWindow?: number; maxOutput?: number }, input: Array<'text' | 'image'> = ['text']): Model<Api> {
   const isResponses = isResponsesModel(id)
   return {
     id,
@@ -185,7 +210,9 @@ function toPiModel(id: string, reasoning: boolean, limits?: { contextWindow?: nu
     // supportsDeveloperRole=false for opencode.ai, so the system slot is
     // unchanged either way).
     reasoning,
-    input: ['text'],
+    // pi-ai gates its own image serialization on this list, so it must mirror
+    // the capability the harness was told about, not the flat text default.
+    input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: contextWindowFor(limits),
     maxTokens: defaultMaxTokensFor(limits),
@@ -194,6 +221,11 @@ function toPiModel(id: string, reasoning: boolean, limits?: { contextWindow?: nu
 
 export class ZenAdapter {
   readonly #catalog: CatalogLike
+  /** Resolved lazily: the attachment service may mount after registration. */
+  #resolveAttachments: (() => AttachmentSeam | undefined) | undefined
+  readonly #maxRequestImageBytes?: number
+  readonly #requestImagePolicy?: { maxPixels: number; maxBytes: number }
+  readonly #maxRequestImages?: number
   readonly #provider: { streamSimple(model: unknown, context: unknown, options: unknown): unknown }
   readonly #responsesProvider: { streamSimple(model: unknown, context: unknown, options: unknown): unknown } | null
   readonly #firstEventMs: number
@@ -203,6 +235,14 @@ export class ZenAdapter {
   constructor(catalog: CatalogLike, options: {
     zenBaseUrl?: string
     providerOverride?: unknown
+    /** Durable attachment service for request-image bytes; may mount late. */
+    resolveAttachments?: () => AttachmentSeam | undefined
+    /** Request-level base64 bound; absent leaves the bound unchecked. */
+    maxRequestImageBytes?: number
+    /** Per-image geometry and byte budget. */
+    requestImagePolicy?: { maxPixels: number; maxBytes: number }
+    /** Occurrence cap across one request. */
+    maxRequestImages?: number
     /** Watchdog windows (tests inject short ones; defaults are live-tuned). */
     firstEventMs?: number
     bodyIdleMs?: number
@@ -210,6 +250,10 @@ export class ZenAdapter {
     responsesBodyIdleMs?: number
   } = {}) {
     this.#catalog = catalog
+    this.#resolveAttachments = options.resolveAttachments
+    this.#maxRequestImageBytes = options.maxRequestImageBytes
+    this.#requestImagePolicy = options.requestImagePolicy
+    this.#maxRequestImages = options.maxRequestImages
     this.#firstEventMs = options.firstEventMs ?? DEFAULT_FIRST_EVENT_MS
     this.#bodyIdleMs = options.bodyIdleMs ?? DEFAULT_BODY_IDLE_MS
     this.#responsesBodyIdleMs = options.responsesBodyIdleMs ?? RESPONSES_BODY_IDLE_MS
@@ -262,7 +306,7 @@ export class ZenAdapter {
     for (const id of this.#catalog.list()) {
       if (seen.has(id)) continue
       seen.add(id)
-      models.push({ provider, id, name: id, inputModalities: ['text'] })
+      models.push({ provider, id, name: id, inputModalities: inputModalitiesFor(this.#catalog, id) })
     }
     return models
   }
@@ -280,7 +324,7 @@ export class ZenAdapter {
       provider,
       id: model,
       name: model,
-      inputModalities: ['text'],
+      inputModalities: inputModalitiesFor(this.#catalog, model),
       context: { contextWindow: contextWindowFor(this.#catalog.limits?.(model)) },
       defaultMaxTokens: defaultMaxTokensFor(this.#catalog.limits?.(model)),
     }
@@ -312,9 +356,44 @@ export class ZenAdapter {
    * failure is not exit-shaped) = the original stream surface untouched.
    */
   async *stream(options: HarnessGenerateOptions): AsyncGenerator<HarnessChunk> {
-    const context = toPiContext(options)
+    const modalities = inputModalitiesFor(this.#catalog, options.model)
+    const imageCapable = modalities.includes('image')
+    const attachments = imageCapable ? this.#resolveAttachments?.() : undefined
+    if (imageCapable && anyMessageHasImage(options.messages) && attachments === undefined) {
+      // The harness kept the image blocks because this route declared image
+      // input, but no attachment service can hand over the bytes. Say so
+      // instead of silently dropping what the user attached.
+      yield {
+        type: 'finish',
+        reason: {
+          kind: 'error',
+          failure: {
+            message: 'opencode2dsh: model accepts image input but this host mounts no durable attachment service, so the attached images cannot be sent',
+            code: 'UNSUPPORTED_CONTENT',
+          },
+        },
+      }
+      return
+    }
+    const context: Awaited<ReturnType<typeof toPiContext>> = attachments === undefined
+      ? toPiContext(options)
+      : await toPiContext(options, {
+        attachments,
+        resolveImageAccess: (ref) => {
+          const hostPath = attachments.imageHostPath?.(ref)
+          return hostPath === undefined ? undefined : { readonlyPath: hostPath }
+        },
+        ...(this.#maxRequestImageBytes === undefined ? {} : { maxRequestImageBytes: this.#maxRequestImageBytes }),
+        ...(this.#requestImagePolicy === undefined ? {} : { requestImagePolicy: this.#requestImagePolicy }),
+        ...(this.#maxRequestImages === undefined ? {} : { maxRequestImages: this.#maxRequestImages }),
+      })
     const ids = deriveRequestIDs(options.messages)
-    const model = toPiModel(options.model, this.#catalog.reasoningCapability(options.model)?.reasoning === true, this.#catalog.limits?.(options.model))
+    const model = toPiModel(
+      options.model,
+      this.#catalog.reasoningCapability(options.model)?.reasoning === true,
+      this.#catalog.limits?.(options.model),
+      modalities,
+    )
     // IP-pool routing context (docs/ip-pool.md 3.3): pi-ai builds the request
     // body and dispatches it on separate layers with no channel for "which
     // model is this fetch for", so the per-request context rides AsyncLocalStorage.
@@ -494,7 +573,7 @@ export class ZenAdapter {
 
   #eventsFor(
     options: HarnessGenerateOptions,
-    context: ReturnType<typeof toPiContext>,
+    context: PiContext,
     ids: ReturnType<typeof deriveRequestIDs>,
     model: ReturnType<typeof toPiModel>,
   ): unknown {

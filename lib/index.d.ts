@@ -1,7 +1,33 @@
 import { EventEmitter } from "node:events";
 
-//#region src/agent-process.d.ts
+//#region src/adapter/zen-adapter.d.ts
 
+/** The durable attachment service the image path resolves request bytes from. */
+interface AttachmentSeam {
+  readImageRequest(ref: {
+    attachmentId: string;
+    mediaType: string;
+    bytes: number;
+    width: number;
+    height: number;
+    name?: string;
+  }, target: {
+    width: number;
+    height: number;
+    maxBytes: number;
+  }, signal?: AbortSignal): Promise<{
+    data: Uint8Array;
+    mediaType: string;
+    bytes: number;
+    width: number;
+    height: number;
+  }>;
+  imageHostPath?(ref: {
+    attachmentId: string;
+  }): string | undefined;
+}
+//#endregion
+//#region src/agent-process.d.ts
 /**
  * Drives the agent child process (design.md section 8.1-8.2):
  * spawn with piped stdio, READY-line handshake for the random port,
@@ -75,6 +101,19 @@ interface Opencode2dshConfig {
   apiKeyEnv?: string;
   /** Model list refresh interval in seconds (agent refresh_seconds matches). */
   refreshSeconds?: number;
+  /**
+   * Request-image policy (adapter mode, v1.0.9). Only bound turns whose model
+   * declares image input on models.dev; text-only models never see an image
+   * block, because dsh-llm projects them to placeholder text first.
+   */
+  /** Base64 payload bound across one request's retained images (default 20MiB). */
+  maxRequestImageBytes?: number;
+  /** Total-pixel budget per image (default 2048*2048). */
+  requestImagePixelBudget?: number;
+  /** Encoded-byte target per image before base64 expansion (default 1MiB). */
+  requestImageMaxBytes?: number;
+  /** Image occurrences one request may carry (default 32). */
+  maxRequestImages?: number;
   /** Restart backoff: initial delay ms. */
   restartDelayMs?: number;
   /** Restart backoff: max delay ms. */
@@ -127,7 +166,7 @@ interface IpPoolConfig {
   /** Same-request rotate attempts on pre-content failures (docs 3.4). */
   maxRotateAttempts?: number;
 }
-type ResolvedConfig = Required<Pick<Opencode2dshConfig, 'providerId' | 'apiKeyEnv' | 'refreshSeconds' | 'restartDelayMs' | 'restartMaxDelayMs' | 'maxConsecutiveCrashes'>> & Opencode2dshConfig;
+type ResolvedConfig = Required<Pick<Opencode2dshConfig, 'providerId' | 'apiKeyEnv' | 'refreshSeconds' | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'maxRequestImages' | 'restartDelayMs' | 'restartMaxDelayMs' | 'maxConsecutiveCrashes'>> & Opencode2dshConfig;
 declare function resolveConfig(config?: Opencode2dshConfig): ResolvedConfig;
 /**
  * Everything the plugin persists next to the agent: the generated
@@ -250,6 +289,8 @@ interface PluginContext {
   };
   /** cordis fiber injection: run the callback once every listed service is up. */
   inject?(services: string[], callback: (ctx: PluginContext) => void | Promise<void>): unknown;
+  /** Optional durable attachment service (request-image bytes). */
+  get?(service: string): AttachmentSeam | undefined;
   effect?(fn: () => () => void): unknown;
   on?(event: string, listener: (...args: never[]) => unknown): () => void;
 }

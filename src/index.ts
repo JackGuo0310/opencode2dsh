@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 
 import { ModelCatalog, defaultCachePath, type CatalogSnapshot } from './adapter/catalog.ts'
-import { ZenAdapter, PROVIDER_ID } from './adapter/zen-adapter.ts'
+import { ZenAdapter, PROVIDER_ID, type AttachmentSeam } from './adapter/zen-adapter.ts'
 import { AgentProcess, type ReadyInfo } from './agent-process.js'
 import { configPaths, ensureToken, resolveConfig, writeAgentConfig, type Opencode2dshConfig } from './config.js'
 import { applyIpPoolSettings } from './ip-pool-settings/apply.ts'
@@ -46,6 +46,8 @@ export interface PluginContext {
   }
   /** cordis fiber injection: run the callback once every listed service is up. */
   inject?(services: string[], callback: (ctx: PluginContext) => void | Promise<void>): unknown
+  /** Optional durable attachment service (request-image bytes). */
+  get?(service: string): AttachmentSeam | undefined
   effect?(fn: () => () => void): unknown
   on?(event: string, listener: (...args: never[]) => unknown): () => void
 }
@@ -96,7 +98,19 @@ function applyAdapter(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
       if (lastError) logger.warn(`opencode2dsh: catalog refresh issue: ${lastError}`)
     },
   })
-  const adapter = new ZenAdapter(catalog)
+  const adapter = new ZenAdapter(catalog, {
+    // Request-image support (v1.0.9). The attachment service is read lazily on
+    // every image-bearing turn, not captured at registration: it is optional on
+    // the host, and a route that declares image input before it mounts must
+    // recover the moment it does rather than stay text-only forever.
+    resolveAttachments: () => ctx.get?.('attachments'),
+    maxRequestImageBytes: cfg.maxRequestImageBytes,
+    requestImagePolicy: {
+      maxPixels: cfg.requestImagePixelBudget,
+      maxBytes: cfg.requestImageMaxBytes,
+    },
+    maxRequestImages: cfg.maxRequestImages,
+  })
 
   // IP-pool exit routing (docs/ip-pool.md IP-1..IP-5): manual proxies,
   // pinned, free sources, subscriptions, and (IP-5) the settings namespace

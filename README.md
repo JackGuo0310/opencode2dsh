@@ -33,6 +33,7 @@ nothing to host.
 - **Native adapter, no sidecar** — one npm package, no child process, no binary, no local port (the legacy Go sidecar is not part of the published package; see `legacy/`)
 - **CLI-identical disguise** — requests carry the OpenCode CLI user agent and its session/request/project header set, derived per conversation
 - **Selectable thinking levels** — reasoning-capable free models expose an effort picker in DSH's model selector (declared ladders where the model metadata provides them, Off/Minimal/Low/Medium/High otherwise); Off sends `reasoning_effort: "none"` upstream to actually stop thinking, and no selection keeps the provider default
+- **Vision where the model has it** — free models that declare image input (Space Bunny, kimi-k2.5-free, minimax-m3-free, …) advertise `image` and receive real image bytes; the rest stay honestly text-only
 - **Live catalog with a fallback chain** — live upstream list ∩ free-by-metadata, falling back to offline cache and a verified static list
 - **Self-healing** — fast startup retries, periodic refresh, and a written health snapshot for diagnostics
 - **Proper error surfaces** — upstream failures (rate limit, auth, timeout, transport) arrive in DSH as classified finish reasons, and retries stay owned by DSH
@@ -46,7 +47,7 @@ install.
 **From npm**:
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.1
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.9
 ```
 
 **From source** (build the tarball yourself):
@@ -87,9 +88,43 @@ Defaults work out of the box. Override via the profile's `cordis.patch.yml`:
 | `mode` | `adapter` | `adapter`: native LlmAdapter streaming straight from Zen. `sidecar`: legacy local-agent mode, not bundled — build the agent from `legacy/agent` and pass `agentPath`. |
 | `providerId` | `opencode2dsh` | Provider name shown in DSH. |
 | `refreshSeconds` | `300` | Live catalog refresh interval. Pricing metadata refreshes every 24 h. |
+| `maxRequestImageBytes` | `20971520` (20 MiB) | Base64 bound across one request's retained images. Exceeding it fails with the host's `IMAGE_OFFLOAD_REQUIRED` code so `dsh-compaction-image-offload` drops the oldest images and retries. |
+| `requestImagePixelBudget` | `4194304` (2048²) | Total-pixel budget per image; larger sources are downscaled proportionally. |
+| `requestImageMaxBytes` | `1048576` (1 MiB) | Encoded-byte target per image before base64 expansion. |
+| `maxRequestImages` | `32` | Image occurrences one request may carry. |
 | `agentPath` | auto-resolved | Sidecar only: path to the agent binary. |
 | `agentArgs` | — | Sidecar only: extra CLI args for the agent. |
 | `restartDelayMs` / `restartMaxDelayMs` / `maxConsecutiveCrashes` | `1000` / `60000` / `5` | Sidecar only: restart backoff and circuit breaker. |
+
+## Image input
+
+Models whose models.dev metadata declares `image` input advertise it in DSH's
+model picker and receive **real image bytes** — each attachment is resolved
+through the host's durable attachment service, sent as `image_url` data URIs
+beside a short handle text that names the file and its read-only normalized
+path. Free models currently on that path include `space-bunny-free`,
+`kimi-k2.5-free`, `minimax-m3-free`, `mimo-v2.6-flash-free` and
+`qwen3.6-plus-free`; every other free model stays honestly text-only.
+
+**Video, PDF and audio are not supported.** Some free models declare those
+modalities upstream, but the DSH host carries exactly one binary modality
+(raster image) and projects every file attachment to handle text for all
+routes, so no adapter can deliver them. Rather than advertise a capability the
+harness cannot transport, the catalog reports only `text` and `image`. Attach
+a video or PDF and the model still receives its path and can read it with a
+tool.
+
+Requires the host's `attachments` service (`dsh-attachment`); without it, an
+image turn fails with `UNSUPPORTED_CONTENT` instead of silently dropping what
+you attached.
+
+> **Live status (probed 2026-09-24).** The Zen free lane currently rejects
+> *every* image part: an `image_url` data URI, a remote `https` URL, even a
+> bogus `data:text/plain` one all return `400 invalid_request_error`, while the
+> identical body without an image returns 200. The plugin's image pipeline is
+> correct and unit-tested — the gate is upstream. This version reports image
+> capability by default, so an image turn will 400 until the lane opens up; no
+> plugin change will be needed when it does.
 
 ## How it works
 
@@ -112,7 +147,8 @@ https://opencode.ai/zen/v1        ← Authorization: Bearer public
   conversation's first user turn (stable per conversation, non-reversible),
   and each request gets a fresh random id, mirroring the CLI.
 - **Catalog fallback chain** — S1: live `GET /v1/models`; S2: models.dev
-  pricing metadata decides "free"; S3: a compile-time verified static list.
+  pricing metadata decides "free" and supplies limits, reasoning ladders and
+  input modalities; S3: a compile-time verified static list.
   A disk cache (~7-day TTL) covers upstream outages.
 - **Resilience** — the adapter registers immediately at startup; if the first
   catalog fetch races your network (VPN/TUN reconnects, DNS), the plugin
