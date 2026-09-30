@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 
 interface PackageManifest {
   name: string
@@ -29,4 +30,16 @@ test('DSH peer requirements are pinned to the supported 0.1.7 release line', () 
 test('compatibility declaration is present in the published manifest', () => {
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(Object.keys(manifest.peerDependencies).length, DSH_PEERS.length)
+})
+
+test('the manifest version matches the v-tag of the current commit', () => {
+  // DSH's plugin manager shows the manifest version, so a release tag that
+  // does not bump it is indistinguishable from the previous one. v1.0.10 was
+  // tagged with the manifest still at 1.0.9; this pins the two together.
+  const head = execFileSync('git', ['describe', '--tags', '--exact-match'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim()
+  if (!head.startsWith('v')) return // not on a tag: nothing to compare against
+  assert.equal(head, `v${manifest.version}`, `tag ${head} must match package.json version ${manifest.version}`)
 })
