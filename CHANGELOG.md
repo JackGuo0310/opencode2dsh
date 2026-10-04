@@ -8,6 +8,7 @@
 
 - `peerDependencies` 从 `>=0.1.7-rc.1 <0.1.8` 改为 `>=0.2.1-alpha.1 <0.3`。
   0.1.x 与 0.2.x 的 peer 范围不重叠，装错版本会直接报不匹配。
+- **IP 池功能暂停**（默认关闭、保留代码但不再维护，见下方范围收缩说明）。
 
 ### 核对结论（逐项对 0.2.1-alpha.1 实机安装包核实，非推测）
 
@@ -27,6 +28,10 @@
 0.2 的破坏性变更在**分发形态**：`@deepseek-ai/dsh` 从「打包 282 个子包」改为
 「核心 83 个 + profile 独立发包」；`dsh-llm` / `dsh-attachment` / `dsh-llm-pi-ai`
 等仍在，改由 profile 依赖。
+
+### 范围收缩（2026-10-04）
+
+IP 池 / 出口路由（`src/ip-pool.ts`、`src/pool/`、设置卡片）**暂停开发并默认关闭**，代码与文档保留在仓库中。匿名免费通道不需要 IP 池：请求默认直连，仅当用户显式在 `cordis.patch.yml` 里开启 `ipPool.enabled` 时才启用出口路由。详见 README 与 `docs/ip-pool.md` 顶部说明。
 
 ### Fixed
 

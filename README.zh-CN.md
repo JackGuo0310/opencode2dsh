@@ -28,6 +28,13 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 
 ## 特性
 
+> **当前范围（v1.1.0）。** 本项目目前专注把 OpenCode Zen 的免费模型接入 DSH：
+> 模型目录、对话、思考等级选择、图片输入。IP 池 / 出口路由功能
+> （`src/ip-pool.ts`、`src/pool/`、设置卡片）**与实现保留在仓库中，已暂停启用
+> 且不在积极维护** —— 等待宿主的新设置通道落地，或有社区贡献者接手。使用
+> 匿名免费通道不需要 IP 池：请求默认直连，仅当用户明确在配置里开启时才会
+> 触发旧的出口路由逻辑。
+
 - **零凭据、零配置**——匿名通道不需要任何 Key；装好、重启、开聊
 - **原生 adapter，无 sidecar**——一个 npm 包，没有子进程、没有二进制、没有本地端口（旧版 Go sidecar 不随包发行，见 `legacy/`）
 - **CLI 同形伪装**——请求携带 OpenCode CLI 的 User-Agent 和整套会话/请求/项目关联头，按会话派生
@@ -45,7 +52,7 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 **从 npm 安装**：
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.9
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.1.0
 ```
 
 **从源码安装**（自行打包）：

@@ -29,6 +29,17 @@ nothing to host.
 
 ## Highlights
 
+> **Scope note (v1.1.0).** This project currently focuses on bringing
+> OpenCode Zen's free models into DSH: model catalog, chat, thinking-level
+> picker, and image input. The IP-pool / exit-routing functionality
+> (`src/ip-pool.ts`, `src/pool/`, the settings card) is **retained in the
+> repository but paused — it is no longer enabled by default and is not
+> actively maintained**, pending either the host's new settings transport or
+> a community contributor picking it up. Free-lane access does not require
+> the IP pool: anonymous requests go direct, and the previous
+> free-pool-only behavior only engages when a user explicitly opts in via
+> config.
+
 - **Zero credential, zero setup** — the anonymous lane needs no key; install, restart, chat
 - **Native adapter, no sidecar** — one npm package, no child process, no binary, no local port (the legacy Go sidecar is not part of the published package; see `legacy/`)
 - **CLI-identical disguise** — requests carry the OpenCode CLI user agent and its session/request/project header set, derived per conversation
@@ -47,7 +58,7 @@ install.
 **From npm**:
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.0.9
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.1.0
 ```
 
 **From source** (build the tarball yourself):
