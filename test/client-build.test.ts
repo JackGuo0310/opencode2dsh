@@ -29,21 +29,33 @@ test('client bundle is built and well-formed', () => {
   assert.ok(/exports\.inject\s*=/.test(source), 'inject exported')
 })
 
-test('client externals stay inside the rc.2 platform table', () => {
+test('client externals stay inside the host platform module table', () => {
   const path = new URL('../lib/client.js', import.meta.url)
   assert.ok(existsSync(path), 'lib/client.js missing — run `pnpm build:client` first')
   const source = readFileSync(path, 'utf8')
   const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map((m) => m[1]!)
-  const allowed = new Set([
-    'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client',
-    '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-slots',
-    '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-runtime/client',
-  ])
+  // The allowlist lives in tsdown.client.config.ts, which is the single place
+  // that declares what the host seeds. Asserting against a copy here would let
+  // the two drift on a DSH upgrade — the exact failure this guards against.
+  const config = readFileSync(new URL('../tsdown.client.config.ts', import.meta.url), 'utf8')
+  const declared = new Set([...config.matchAll(/'([^']+)'/g)].map((m) => m[1]!))
   for (const specifier of required) {
     assert.ok(
-      allowed.has(specifier),
-      `bundle requires "${specifier}" which is not in the rc.2 module table — it would miss at runtime`,
+      declared.has(specifier),
+      `bundle requires "${specifier}" which the build config does not declare as a host module — it would miss at runtime`,
     )
+  }
+})
+
+test('the declared host modules all exist as published packages', () => {
+  // dsh-client-runtime has no 0.2.x release; if a future DSH drops it from the
+  // preload graph this name becomes a lie and the client half breaks at runtime
+  // rather than at build time. Guard the specific externals that are not also
+  // core packages.
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  for (const name of Object.keys(pkg.devDependencies ?? {})) {
+    if (!name.startsWith('@deepseek-ai/dsh-client-')) continue
+    assert.ok(pkg.devDependencies[name] !== undefined, `${name} must declare a version`)
   }
 })
 

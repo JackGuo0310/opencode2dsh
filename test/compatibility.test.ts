@@ -16,9 +16,9 @@ const manifest = JSON.parse(
 ) as PackageManifest
 const DSH_PEERS = Object.keys(manifest.peerDependencies)
   .filter(name => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
-const RANGE = '>=0.1.7-rc.1 <0.1.8'
+const RANGE = '>=0.2.1-alpha.1 <0.3'
 
-test('DSH peer requirements are pinned to the supported 0.1.7 release line', () => {
+test('DSH peer requirements are pinned to the supported 0.2 release line', () => {
   assert.ok(DSH_PEERS.includes('@deepseek-ai/dsh'))
 
   for (const name of DSH_PEERS) {

@@ -73,7 +73,7 @@
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh": ">=0.1.7-rc.1 <0.1.8"
+    "@deepseek-ai/dsh": ">=0.2.1-alpha.1 <0.3"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh": {
