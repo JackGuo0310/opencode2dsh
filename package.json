@@ -1,6 +1,6 @@
 {
   "name": "@jackguo0310/opencode2dsh",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "description": "Free OpenCode Zen models for DeepSeek Harness (DSH): native dsh-llm adapter plugin, no API key.",
   "type": "module",
   "main": "lib/index.js",
@@ -34,9 +34,9 @@
     },
     "client": {
       "inject": [
-        "slots",
-        "locale",
-        "settingsScope"
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
       ],
       "platform": "web"
     }

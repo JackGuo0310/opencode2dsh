@@ -62,9 +62,16 @@ dsh plugin --profile web add ./jackguo0310-opencode2dsh-<version>.tgz
 需要带 web profile 的 DSH（DeepSeek Harness）；Node.js ≥ 20（DSH 能跑就满足）；
 出站 HTTPS 需可达 `opencode.ai` 与 `models.dev`。
 
-> **兼容性说明** —— 本 fork 基于并已验证于 **DSH `0.1.7-alpha.2`**。
-> 模型路由/调用不受宿主插件设置槽位契约影响；若宿主缺少 `settings.get/mutate`，
-> 设置卡片只是不显示（一条警告，非报错）。
+> **兼容性 —— DSH `0.2.1-alpha.1`（不再支持 0.1.x）。**
+> 模型路由、对话、思考等级、图片输入均正常：`LlmAdapter` 契约、`registerAdapter`、
+> 模态词汇表、附件服务、settings 接口、`cordis` 的 context API、以及 web 前端平台
+> 模块表在 0.2 里都没有变化。
+>
+> **IP 池设置卡在 0.2.1 上不会出现。** 宿主移除了它依赖的两样东西——客户端
+> `settingsScope` 服务，以及 `settings.plugin.item` 槽位（改名为
+> `settings.plugins.tab`），因此卡片降级为「不显示」。这只是缺一张卡片，不是故障：
+> 插件的客户端半边仍会激活，模型路由不受影响。移植该卡片需要接入新的设置通道，
+> 属于单独的待办。
 
 ## 配置
 

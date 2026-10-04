@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.1.0 (2026-10-04)
+
+**适配 DSH `0.2.1-alpha.1`（不再支持 0.1.x）。模型路由、对话、思考等级、图片输入全部正常；IP 池设置卡在新宿主上不显示。**
+
+### Changed
+
+- `peerDependencies` 从 `>=0.1.7-rc.1 <0.1.8` 改为 `>=0.2.1-alpha.1 <0.3`。
+  0.1.x 与 0.2.x 的 peer 范围不重叠，装错版本会直接报不匹配。
+
+### 核对结论（逐项对 0.2.1-alpha.1 实机安装包核实，非推测）
+
+宿主半边**全部不变**，无需改代码：
+
+| 插件依赖 | 0.2.1 状态 |
+| --- | --- |
+| `LlmAdapter` 七个方法（含 `imageRequestPricing`） | 一致 |
+| `registerAdapter(providers, adapter)` | 一致；只校验 `providerInfo` / `providerRetryPolicy`，**无 `instanceof` 检查**，普通对象照常可注册 |
+| `await adapter.listModels()` | 宿主用 `await`，同步返回数组仍然可用 |
+| `ModelModalityMap` / `inputModalities` | 一致 |
+| 附件服务 `readImageRequest` / `imageHostPath` | 一致 |
+| `cordis` `Context.get` / `effect` / `inject` | 一致（`context.d.ts` 逐字节相同） |
+| `cordis.patch.yml` 的 `insert` 处理 | 一致（`applyPatches` 实现相同） |
+| web 前端平台模块表 | 一致（4 个 seed 名字未变） |
+
+0.2 的破坏性变更在**分发形态**：`@deepseek-ai/dsh` 从「打包 282 个子包」改为
+「核心 83 个 + profile 独立发包」；`dsh-llm` / `dsh-attachment` / `dsh-llm-pi-ai`
+等仍在，改由 profile 依赖。
+
+### Fixed
+
+- **`dsh.client.inject` 填的是服务名，应为包名。** 该字段是客户端模块图的加载顺序
+  列表，取**包名**（DSH 自带插件的manifest 均如此），而不是 cordis 服务名。原值
+  `['slots','locale','settingsScope']` 会被 `dsh-client-modules` 在模块图里查不到后
+  **静默跳过**——是一段看起来有用、实则无害的空操作。服务注入由
+  `src/client/index.ts` 导出的 `inject` 负责，那里本来就是对的
+  （`['slots','locale']`，settingsScope 已按 0.1.7-alpha 的教训放在嵌套 inject 里）。
+  现改为三个真实包名。
+- 版本一致性测试在 HEAD 未打 tag 时崩掉（`git describe --exact-match` 会以非零退出
+  而非输出空行），现改为捕获后跳过。
+
+### 已知问题：IP 池设置卡在 0.2.1 不显示
+
+宿主移除了卡片依赖的两样东西，**两者在 0.2.1 里都已确认不存在**：
+
+- 客户端 `settingsScope` 服务（全宿主搜索无匹配）
+- `settings.plugin.item` 槽位（改名为 `settings.plugins.tab`）
+
+卡片因此降级为「不显示」。**这只缺一张卡片，不是故障**：客户端半边仍会激活
+（模块级 `inject = ['slots','locale']` 两个服务都在，`ctx.locale.register` 签名未变），
+嵌套的 `settingsScope` inject 永不被满足，回调不执行，也就不会碰到已移除的
+`slots.inject('settings.plugin.item', …)`。模型路由完全不受影响。
+
+移植该卡片需要接入 0.2 的新设置通道（`settings.plugins.tab` 槽位形状已探明：
+`{ name, id, order, label, locale, inject }`，由 `settings.section` 的 `children`
+声明），属于单独的待办，不在本版范围内。
+
 ## 1.0.9 (2026-09-24)
 
 **新增：免费模型的图片能力真正打通了。此前所有模型都被硬编码为纯文本，DSH 会在派发前把图片剥离，Space Bunny 这类多模态免费模型的看图能力完全用不上。**

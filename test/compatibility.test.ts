@@ -36,10 +36,16 @@ test('the manifest version matches the v-tag of the current commit', () => {
   // DSH's plugin manager shows the manifest version, so a release tag that
   // does not bump it is indistinguishable from the previous one. v1.0.10 was
   // tagged with the manifest still at 1.0.9; this pins the two together.
-  const head = execFileSync('git', ['describe', '--tags', '--exact-match'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim()
-  if (!head.startsWith('v')) return // not on a tag: nothing to compare against
+  // `git describe --exact-match` exits non-zero off a tag (it does not print
+  // an empty line), so the untagged case is a caught failure, not a value.
+  let head: string
+  try {
+    head = execFileSync('git', ['describe', '--tags', '--exact-match'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return // HEAD is not tagged: nothing to compare against
+  }
   assert.equal(head, `v${manifest.version}`, `tag ${head} must match package.json version ${manifest.version}`)
 })

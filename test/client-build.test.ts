@@ -63,6 +63,17 @@ test('client manifest is declared in package.json', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.ok(pkg.dsh?.client, 'dsh.client manifest missing')
   assert.equal(pkg.dsh.client.platform, 'web')
-  assert.deepEqual(pkg.dsh.client.inject, ['slots', 'locale', 'settingsScope'])
+  // dsh.client.inject is the client module-graph load-order list: it takes
+  // PACKAGE names (the convention in every stock @deepseek-ai/dsh-client-*
+  // manifest), not cordis service names. The service inject lives in
+  // src/client/index.ts's exported `inject`. This field previously held
+  // 'slots' / 'locale' / 'settingsScope' — service names that
+  // dsh-client-modules looks up in the module graph, fails to find, and
+  // silently skips, so the list was a no-op that read as if it did something.
+  assert.deepEqual(pkg.dsh.client.inject, [
+    '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-locale',
+    '@deepseek-ai/dsh-client-ui-settings-plugins',
+  ])
   assert.deepEqual(pkg.exports?.['./client'], './lib/client.js')
 })

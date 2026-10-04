@@ -65,10 +65,18 @@ the **opencode2dsh** group.
 Requires DSH (DeepSeek Harness) with a web profile; Node.js ≥ 20 (already
 present if DSH runs); outbound HTTPS to `opencode.ai` and `models.dev`.
 
-> **Compatibility** — this fork is built and verified against **DSH `0.1.7-alpha.2`**.
-> Model routing / calls are unaffected by the host's plugin-settings slot
-> contract; on hosts that omit `settings.get/mutate` the settings card is
-> simply absent (a warning, not an error).
+> **Compatibility — DSH `0.2.1-alpha.1` (0.1.x is no longer supported).**
+> Model routing, chat, thinking levels and image input all work: the
+> `LlmAdapter` contract, `registerAdapter`, the modality vocabulary, the
+> attachment service, the settings seam, `cordis`'s context API and the
+> web-frontend platform module table are unchanged in 0.2.
+>
+> **The IP-pool settings card does not appear on 0.2.1.** The host removed both
+> pieces it depends on — the `settingsScope` client service and the
+> `settings.plugin.item` slot (renamed `settings.plugins.tab`) — so the card
+> degrades to absent. This is a missing card, not a failure: the plugin's
+> client half still activates, and model routing is untouched. Porting the card
+> needs the new settings transport and is tracked as separate work.
 
 ## Configuration
 
