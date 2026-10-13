@@ -58,7 +58,7 @@ install.
 **From npm**:
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.2.0
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.2.1
 ```
 
 **From source** (build the tarball yourself):
