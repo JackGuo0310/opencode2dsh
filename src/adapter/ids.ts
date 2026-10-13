@@ -65,12 +65,14 @@ export function deriveRequestIDs(messages: Array<{ role: string; content: unknow
  * OpenCode's canonical session shape: "ses_" + 12 lowercase hex timestamp
  * characters + 14 Base62 characters. Since 2026-09-16 the Zen free tier
  * rejects any other session shape with 403 FreeTierError ("free tier can
- * only be used from within OpenCode") — the plain User-Agent gate stopped
- * being sufficient (upstream fix: jasonxu114514/opencode2api 8185202).
- * Live-probed 2026-09-18: the gate has a second, body-shape half (streaming
- * + bash/read tools, adapter/messages.ts); both must pass.
+ * only be used from within OpenCode"). Since 2026-10-13 it additionally
+ * validates the timestamp field produced by Identifier.descending(): the
+ * inverted 48-bit value must end in the counter window 0xfc0-0xfff.
+ * Live-probed 2026-10-13: a plain hashed timestamp 403s while the descending
+ * encoding succeeds, with the existing streaming + bash/read body gate.
  */
 const CANONICAL_SESSION_PATTERN = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+const DESCENDING_TIME_PART_PATTERN = /^[0-9a-f]{9}f[c-f][0-9a-f]$/
 
 const BASE62_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 
@@ -86,16 +88,34 @@ function base62Fixed(value: bigint, width: number): string {
 }
 
 /**
- * The session id sent upstream. A signal that already carries an official
- * OpenCode session passes through unchanged (preserving upstream prompt-cache
- * affinity); any other identity — the conversation seed in adapter mode,
- * foreign client sessions, admission probes — is deterministically hashed
- * into the canonical shape, so the same conversation keeps a stable session.
+ * Render six hash bytes in the layout minted by OpenCode's
+ * Identifier.descending(): use the first 36 hash bits as a stable timestamp,
+ * append counter 1, then invert the 48-bit word. The resulting suffix is ffe,
+ * inside the free-tier gate's accepted counter window.
+ */
+function descendingTimePart(hash: Buffer): string {
+  let current = (
+    (BigInt(hash[0]!) << 28n)
+    | (BigInt(hash[1]!) << 20n)
+    | (BigInt(hash[2]!) << 12n)
+    | (BigInt(hash[3]!) << 4n)
+    | (BigInt(hash[4]!) >> 4n)
+  ) << 12n
+  current |= 1n
+  return ((~current) & 0xffffffffffffn).toString(16).padStart(12, '0')
+}
+
+/**
+ * The session id sent upstream. Only sessions carrying the official descending
+ * time encoding pass through unchanged. Other identities — including legacy
+ * canonical-shape IDs with a raw-hash timestamp — are deterministically
+ * re-encoded, so the same conversation keeps a stable session while satisfying
+ * the current free-tier gate.
  */
 export function canonicalSessionID(signal: string): string {
-  if (CANONICAL_SESSION_PATTERN.test(signal)) return signal
+  if (CANONICAL_SESSION_PATTERN.test(signal) && DESCENDING_TIME_PART_PATTERN.test(signal.slice(4, 16))) return signal
   const sum = createHash('sha256').update('ses\x00' + signal).digest()
-  const timePart = sum.subarray(0, 6).toString('hex')
+  const timePart = descendingTimePart(sum.subarray(0, 6))
   const randomPart = base62Fixed(BigInt('0x' + sum.subarray(6, 16).toString('hex')), 14)
   return `ses_${timePart}${randomPart}`
 }

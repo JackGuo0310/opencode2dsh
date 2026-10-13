@@ -24,28 +24,33 @@ test('randomID differs per call with the requested size', () => {
   assert.equal(a.slice('req_'.length).length, 32, '16 bytes hex')
 })
 
-test('canonicalSessionID passes official sessions through unchanged', () => {
-  const official = 'ses_00000000abc0ABCdefGHIjklMN'
+test('canonicalSessionID passes official descending sessions through unchanged', () => {
+  const official = 'ses_00000000affeABCdefGHIjklMN'
   assert.match(official, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
   assert.equal(canonicalSessionID(official), official)
+  // Legacy raw-hash timestamps have the right outer shape but must be re-encoded.
+  const legacy = 'ses_00000000abc0ABCdefGHIjklMN'
+  assert.match(legacy, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
+  assert.notEqual(canonicalSessionID(legacy), legacy)
   // foreign shapes do NOT match the canonical gate: 24-hex is the wrong length
   assert.doesNotMatch('ses_0123456789abcdef01234567', /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
 })
 
-test('canonicalSessionID hashes foreign ids into the canonical shape', () => {
-  // Regression vectors computed independently of the implementation
-  // (sha256("ses\0"+signal): 6B hex + 10B big-endian base62, width 14).
-  assert.equal(canonicalSessionID('"hello"'), 'ses_5158bbbedb260ySUUEO3741Ult')
-  assert.equal(canonicalSessionID('admission:1.2.3.4:8080'), 'ses_a226427749f939B83lyhD6aJHb')
+test('canonicalSessionID hashes foreign ids into the descending canonical shape', () => {
+  // Regression vectors computed independently from opencode2api's
+  // Identifier.descending encoding plus 10-byte big-endian base62, width 14.
+  assert.equal(canonicalSessionID('"hello"'), 'ses_aea744412ffe0ySUUEO3741Ult')
+  assert.equal(canonicalSessionID('admission:1.2.3.4:8080'), 'ses_5dd9bd88bffe39B83lyhD6aJHb')
   // deterministic: same conversation keeps a stable session
   assert.equal(canonicalSessionID('anything'), canonicalSessionID('anything'))
   // distinct identities stay distinct
   assert.notEqual(canonicalSessionID('a'), canonicalSessionID('b'))
 })
 
-test('deriveRequestIDs emits canonical-shape sessions', () => {
+test('deriveRequestIDs emits descending canonical-shape sessions', () => {
   const ids = deriveRequestIDs([{ role: 'user', content: 'hello' }])
-  assert.match(ids.session, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/)
+  assert.match(ids.session, /^ses_[0-9a-f]{9}f[c-f][0-9a-f][0-9A-Za-z]{14}$/)
+  assert.equal(ids.session.slice(14, 16), 'fe', 'counter 1 encodes to the descending ffe suffix')
 })
 
 test('conversationSeed uses the first user turn and skips non-user messages', () => {
