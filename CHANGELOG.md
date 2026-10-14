@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### 状态
+
+- **2026-10-14：Zen 免费通道对非官方客户端全面 403，插件的免 key 匿名路径失效。** 实测换 UA、换会话 ID 编码（含与官方一致的 descending 时间编码）、带或不带 `oc_sk_` key、带或不带 session 头，四条路径全部 `403 FreeTierError`；同一时刻官方 OpenCode 2.0.29 客户端可正常调用免费模型（`TEST_OK`），v1 客户端与两个参考实现同样被拒。
+- 闸门现在只认官方客户端产生并登记过的会话，本仓库 v1.2.0 的 descending 编码修复已不足以通过。
+- 复现数据、判定依据与可行路径见 [docs/zen-free-tier-status.md](docs/zen-free-tier-status.md)。暂不改动代码，等上游变化后再决定是否改造成依赖本机 opencode v2 服务。
+
 ## 1.2.1 (2026-10-13)
 
 ### Fixed
