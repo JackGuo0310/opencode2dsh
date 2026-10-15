@@ -615,9 +615,10 @@ export class ZenAdapter {
     skipEffort = false,
   ): unknown {
     // Structural boundary: PiContext (own types, unit-tested) -> pi-ai Context.
-    // onPayload injects the free-lane gate tools (adapter/messages.ts) into the
-    // serialized body right before dispatch — plain-chat contexts carry no
-    // tools and the anonymous lane 403s every body without bash+read. The same
+    // onPayload injects the free-lane gate declaration (adapter/messages.ts)
+    // into the serialized body right before dispatch — plain-chat contexts carry
+    // no tools and the anonymous lane 403s every body without a real `read`.
+    // The same
     // seam carries the selected reasoning effort: pi-ai has no option with the
     // wire semantics this lane needs, so the effort rides the payload rewrite
     // instead. skipEffort is the resend after the lane refused the field.

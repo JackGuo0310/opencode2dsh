@@ -47,6 +47,17 @@ export function conversationSeed(messages: Array<{ role: string; content: unknow
 }
 
 /**
+ * The project id the V2 gate accepts: 40 lowercase hex (the official CLI's
+ * shape) or the literal "global". The earlier `prj_<24hex>` correlation form is
+ * refused with 403 on its own, everything else held fixed (live-probed
+ * 2026-10-15 22:40). Stable per install, so upstream affinity keeps behaving
+ * like one workspace.
+ */
+export function projectID(): string {
+  return createHash('sha256').update('opencode2dsh:default-project').digest('hex').slice(0, 40)
+}
+
+/**
  * Derive the correlation ids for one upstream request. In adapter mode there
  * are no inbound opencode headers, so the seed is the conversation itself.
  */
@@ -56,7 +67,7 @@ export function deriveRequestIDs(messages: Array<{ role: string; content: unknow
   return {
     session: canonicalSessionID(signal),
     request: randomID('req', 16),
-    project: stableID('prj', 'opencode2dsh:default-project'),
+    project: projectID(),
     parentSession: '',
   }
 }
@@ -129,18 +140,19 @@ export function opencodeUserAgent(): string {
  * The full disguise header set sent with every upstream request
  * (design.md 2.4; gateway.go newUpstreamRequest:640-669).
  *
- * `x-opencode-request` is deliberately NOT sent since 2026-10-15: on the V2
- * `/inference/v1` free-tier gate its mere presence turns a passing request
- * into `403 FreeTierError`. Ablated live with everything else held fixed —
- * adding the header back flips a 200 to a 403, removing it flips it back.
- * `RequestIDs.request` is still derived and exposed for callers that want the
- * correlation id, it is just not put on the wire.
+ * Two corrections from the 2026-10-15 22:30 ablation (docs/zen-free-tier-status.md):
+ * `x-opencode-session-id` is REQUIRED — dropping it alone flips a passing
+ * request to `403 FreeTierError`; and `x-opencode-request` is deliberately NOT
+ * sent — its presence alone flips a passing request to `403`. `RequestIDs.request`
+ * is still derived and exposed for callers that want the correlation id, it is
+ * just not put on the wire.
  */
 export function disguiseHeaders(ids: RequestIDs): Record<string, string> {
   return {
     'user-agent': opencodeUserAgent(),
     'x-opencode-client': 'cli',
     'x-opencode-session': ids.session,
+    'x-opencode-session-id': ids.session,
     'x-session-affinity': ids.session,
     'X-Session-Id': ids.session,
     'x-opencode-project': ids.project,

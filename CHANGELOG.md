@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.2.3 (2026-10-15)
+
+### Fixed
+
+- **免费门禁当晚再次收紧，按新规则修好。** v1.2.2 的写法（`bash`+`read` 双桩工具、不发 `x-opencode-session-id`、`x-opencode-project` 用 `prj_<24hex>`）自 2026-10-15 22:00 起一律 `403 FreeTierError`，三个变量都得改：
+  - **`x-opencode-session-id` 必须发送**（与 `x-opencode-session` 同值）：单独去掉它就从 200 变 403（`src/adapter/ids.ts`）。
+  - **`x-opencode-project` 必须是 40 位小写 hex**（或字面量 `global`）：旧的 `prj_<24hex>` 形状单独触发 403（`src/adapter/ids.ts`，新增 `projectID()`）。
+  - **`tools` 里必须带内置 `read` 的真实声明**（`properties` 非空 + `required: ['filePath']`）：空 schema 的 `read`、或只有 `bash`，都 403。同时**不再注入 `bash` 桩**——空 schema 的 `bash` 本身就是 403 的原因，真 schema 的 `bash`/`glob`/`grep`/`edit` 与 `read` 共存则是 200（`src/adapter/messages.ts`）。
+- 仍然完全匿名：`Authorization: Bearer public`，无需 key、无需登录、无需安装或运行官方 opencode 客户端。`x-opencode-request` 依旧不上线（带上即 403，`msg_`/`prt_` 形式都一样）。
+
+### 实测矩阵（2026-10-15 22:30–22:40，本机，匿名，逐项消融）
+
+| 变量 | 结果 |
+| --- | --- |
+| 真 `read` schema + `x-opencode-session-id` + 无 `x-opencode-request` + project 40 位 hex | **200** |
+| 去掉 `x-opencode-session-id` | 403 |
+| 加回 `x-opencode-request` | 403 |
+| `x-opencode-project` = `prj_<24hex>` | 403 |
+| `x-opencode-project` = `global` / 任意 40 位 hex | 200（形状有关、取值无关） |
+| `tools` 里的 `read` 是空 schema | 403 |
+| `tools` 只有 `bash`（真 schema） | 403 |
+| 真 `read` + 真 `bash`/`glob`/`grep`/`edit` | 200 |
+| 真 `read` + 空 schema 的 `bash` | 403 |
+| 真 `read` + 空 schema 的 `webfetch`/`todowrite` 等未知名字 | 200 |
+| `stream: false` 或省略 `stream` | 403 |
+
+`/inference/v1` 与官方 Console 用的 `/inference/openai/v1` 两条路径都可用。
+
+### 验证
+
+- `node test/live-capture.mts` → `result: kind=stop text="OK"`（直连与走系统代理均通过）。
+- 单元测试 67 项通过（`test/subscription.test.ts` 因硬编码了他人机器的临时目录路径，在任何非作者机器上都失败，与本次改动无关）。
+- 规则与消融过程记入 [docs/zen-free-tier-status.md](docs/zen-free-tier-status.md)；参考实现 [zhuweiyou/oc2api](https://github.com/zhuweiyou/oc2api) 2.7.x 结论一致（只保留内置 `read`、必须真 schema），[apmantza/pi-free #614](https://github.com/apmantza/pi-free/pull/614) 的「必须发 `msg_` 前缀 `x-opencode-request`」在本机消融下不成立。
+
 ## 1.2.2 (2026-10-15)
 
 ### Fixed

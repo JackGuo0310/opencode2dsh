@@ -78,7 +78,8 @@ test('deriveRequestIDs keeps the session stable across turns and randomizes requ
   assert.equal(first.session, second.session)
   assert.notEqual(first.request, second.request)
   assert.equal(first.project, second.project)
-  assert.ok(first.project.startsWith('prj_'))
+  // 40 lowercase hex: the `prj_<24hex>` form 403s on its own (2026-10-15 22:40).
+  assert.match(first.project, /^[0-9a-f]{40}$/)
   assert.equal(first.parentSession, '')
   // fallback: no user content at all still yields usable ids
   const empty = deriveRequestIDs([{ role: 'system', content: 'only system' }])
@@ -92,6 +93,10 @@ test('disguiseHeaders carries the CLI-identical correlation set', () => {
   assert.equal(headers['user-agent'], opencodeUserAgent())
   assert.equal(headers['x-opencode-client'], 'cli')
   assert.equal(headers['x-opencode-session'], ids.session)
+  // The V2 /inference/v1 gate requires the raw session id on
+  // x-opencode-session-id: dropping it alone flips a 200 to a 403
+  // (live-probed 2026-10-15 22:30).
+  assert.equal(headers['x-opencode-session-id'], ids.session)
   assert.equal(headers['x-session-affinity'], ids.session)
   assert.equal(headers['X-Session-Id'], ids.session)
   // The V2 /inference/v1 gate 403s any request carrying x-opencode-request,

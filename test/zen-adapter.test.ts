@@ -172,7 +172,10 @@ const gateBody = {
   model: 'big-pickle',
   messages: [{ role: 'user', content: 'hi' }],
   stream: true,
-  tools: ['bash', 'read'].map((name) => ({ type: 'function', function: { name, description: 'd', parameters: {} } })),
+  tools: [
+    { type: 'function', function: { name: 'bash', description: 'd', parameters: { type: 'object', properties: { command: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'read', description: 'd', parameters: { type: 'object', properties: { filePath: { type: 'string' } } } } },
+  ],
 }
 
 async function runStream(catalogReasoning: boolean, effort?: string): Promise<Array<{ onPayload?: (payload: unknown) => unknown }>> {
@@ -209,13 +212,13 @@ test('stream injects the selected reasoning_effort into the outgoing body', asyn
 })
 
 test('stream keeps the free-lane gate rewrite alongside the effort injection', async () => {
-  // a body missing the gate tools gets them AND the effort in one rewrite
+  // a body missing the gate declaration gets it AND the effort in one rewrite
   const lowOptions = (await runStream(true, 'low'))[0]!
   const shaped = lowOptions.onPayload?.({ model: 'big-pickle', messages: [], stream: true }) as Record<string, unknown>
   assert.equal(shaped.reasoning_effort, 'low')
   assert.deepEqual(
-    (shaped.tools as Array<{ function: { name: string } }>).map((t) => t.function.name).sort(),
-    ['bash', 'read'],
+    (shaped.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
+    ['read'],
   )
   assert.equal(shaped.tool_choice, 'none')
 

@@ -1,46 +1,46 @@
 # Zen 免费通道状态（非官方客户端）
 
-**结论（2026-10-15 复核）：匿名免费通道可用。** 2026-10-11 起上游把免费层从 `/zen/v1` 迁到 V2 的 `/inference/v1`，本插件的免 key 匿名路径在换路径、并停发一个头之后恢复。
+**结论（2026-10-15 22:40 复核）：匿名免费通道可用。** 门禁在 10-15 白天之后又换了一层校验面：路径仍在 `/inference/v1`，但**请求头与工具声明都要对**——`x-opencode-session-id` 必发、`x-opencode-request` 必不发、`x-opencode-project` 必须是 40 位小写 hex（或字面量 `global`），并且 `tools` 里必须带**真 schema 的内置 `read`**。
 
-> 本文在 v1.2.1 之后曾记录「免费层只认官方登记会话、非官方客户端无解」。那个结论是错的：免费层没有关闭，只是换了路由。当时的消融矩阵恰好全程带着 `x-opencode-request`（见下），把门禁的真实变量误判成了会话登记。以下为 2026-10-15 重测结果。
+> 时间线：10-15 16:38 的 v1.2.2 结论（换到 `/inference/v1` + 停发 `x-opencode-request` + bash/read 桩工具）在当晚 22:00 已不成立：同一份桩工具（`parameters: { type: 'object', properties: {} }`）现在一律 403。以下为 22:30–22:40 的逐项消融实测，均已随 v1.2.3 修入适配器。
 
 ## 当前有效规则（逐项消融实测）
 
-请求面：`POST https://opencode.ai/inference/v1/chat/completions`，`Authorization: Bearer public`（字面量，不是 key）。
+请求面：`POST https://opencode.ai/inference/v1/chat/completions`（官方 Console 配置用的是 `/inference/openai/v1`，两者都通），`Authorization: Bearer public`（字面量，不是 key）。
 
 | 变量 | 结果 |
 | --- | --- |
-| 基线：`/inference/v1` + 合法 descending session + 无 `x-opencode-request` | **200**（正常流式返回） |
-| 同请求改打 `/zen/v1` | 403 |
-| **加回 `x-opencode-request`** | **403** |
-| `x-opencode-project` = `global` / 40 位 hex / 完全不发 | 均 200（**取值无关**） |
-| UA 用旧的 `opencode/1.18.31 ai-sdk/provider-utils/… runtime/bun/…` | 200（**形状不校验**） |
-| 完全不带 session 头 | 403 |
+| 基线：真 `read` schema + `x-opencode-session-id` + 无 `x-opencode-request` + project 40 hex | **200**（正常流式返回） |
+| 去掉 `x-opencode-session-id` | 403 |
+| 加回 `x-opencode-request`（`msg_` 或 `prt_` 形式都一样） | 403 |
+| `x-opencode-project` = `prj_<24hex>`（旧适配器的形状） | 403 |
+| `x-opencode-project` = `global` / 任意 40 位 hex | 200（取值无关，**形状**有关） |
+| `tools` 只有 `read` 且 `properties` 非空 + `required: ['filePath']` | 200 |
+| `tools` 里的 `read` 是空 schema（`properties: {}`） | 403 |
+| `tools` 只有 `bash`（真 schema）、没有 `read` | 403 |
+| `tools` = 真 `read` + 真 `bash`/`glob`/`grep`/`edit` | 200 |
+| `tools` = 真 `read` + **桩 `bash`**（空 schema） | 403 |
+| `tools` = 真 `read` + 空 schema 的 `webfetch`/`foo`/`todowrite` | 200（未知名字不校验） |
 | `stream: false`，或省略 `stream` | 403 |
-| `tools` 只含 `bash`，或只含未知工具名（`foo`） | 403 |
-| `tools` 含 `read` / `edit` / `glob` / `grep` 任一 | 200（未知工具名可共存） |
 
-- `GET /inference/v1/models` 匿名 200，目录与 `/zen/v1/models` 相同（模型目录两侧都不设门禁）。
-- 连发 10 次匿名请求 10/10 成功，未观察到限流。
-- 仍未验证：`/inference/v1/responses`（`space-bunny-free` 报 `ModelProtocolUnsupported`，属模型协议限制而非门禁）、`/inference/v1/messages`。
+要点：**门禁认的是"内置 `read` 的真实声明"**，不是"有 read 这个名字"；同时**任何叫 `bash` 的桩声明都是毒药**（旧实现注入的正是 bash+read 双桩，所以 403）。其余未知工具名带空 schema 无所谓。
 
-## 三个真实变量
-
-1. **路径**：必须 `/inference/v1`。`/zen/v1` 对匿名一律 403。
-2. **`x-opencode-request` 必须不发**：它的存在本身就是拒绝条件，与取值无关。
-3. **body 形状**：必须 `stream: true`，且 tools 里至少有一个文件类工具（`read`/`edit`/`glob`/`grep`）。只发 `bash` 不够——这与 2026-09-18 记录的「agent-shape」是同一层校验。
-
-session 头仍然必须有，且必须是 `ses_<12 hex><14 base62>`、时间段为 descending 编码（v1.2.0 的修复依旧有效）。
-
-## 与参考实现的关系
-
-- [6Kmfi6HP/opencode2api 0924584](https://github.com/6Kmfi6HP/opencode2api/commit/0924584b0f9413f5408a82f39f964f9e6b8ea24e)（2026-10-15）方向正确：迁到 `/inference/v1`、停发 `x-opencode-request`。本仓库采用同样的两个变量。
-- 该提交另外两条不成立：「`x-opencode-project` 必须为 `global`」（实测取值无关，40 位 hex 与不发送均 200）、「UA/版本下限必须对齐 v2 2.0.29」（实测旧 UA 200）。照抄无害，但不必需。
-- [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) 10-14 起只有监控/用量类提交，未跟进路径迁移。
+`GET /inference/v1/models` 匿名 200，目录不受门禁影响。
 
 ## 复现步骤
 
-1. 生成合法 session：`ses_` + 12 位小写 hex（48 位 `~(ts_ms*4096+counter)` 的反码）+ 14 位 Base62。
-2. `GET https://opencode.ai/inference/v1/models`，带 `authorization: Bearer public`、`x-opencode-client: cli`、`x-opencode-project: global`，应得 200（>80 个 id）。
-3. `POST https://opencode.ai/inference/v1/chat/completions`，body 为 `stream: true` + 至少一个文件类工具桩，headers 带 `x-opencode-session`，**不带** `x-opencode-request`，应得 200 流式响应。
-4. 对照：同一步把路径换回 `/zen/v1`，或加回 `x-opencode-request`，应得 `403 FreeTierError`。
+1. `node test/live-capture.mts` —— 打印适配器真正发出的头与 body，并跑一轮真实对话；修好后应输出 `result: kind=stop text="OK"`。
+2. 手测基线：`POST https://opencode.ai/inference/v1/chat/completions`，头 `authorization: Bearer public`、`x-opencode-client: cli`、`x-opencode-session/-session-id/-affinity/X-Session-Id`（同值）、`x-opencode-project: <40hex>`，**不带** `x-opencode-request`；body `stream: true` + 真 `read` schema。
+3. 对照：把 `x-opencode-project` 换成 `prj_…`、去掉 `x-opencode-session-id`、或把 `read` 换成空 schema，都应得 `403 FreeTierError`。
+
+## 与官方客户端的关系
+
+- 同机官方 CLI（v2.0.29）始终能用免费模型（实测 `TEST_OK`）；官方后台服务 `POST /api/session/{id}/generate` 也 200，而只带一个随机 session 头的 `POST /api/experimental/generate` 复现 403 —— 与上表的头部/工具规则一致。
+- 官方 Console 配置（`GET https://opencode.ai/console/api/v2/config`，`Authorization: Bearer oc_sk_…`）给出 `opencode` provider：`baseURL=https://opencode.ai/inference/openai/v1`、`apiKey={env:OPENCODE_CONSOLE_TOKEN}`、头 `x-opencode-org-id: wrk_…`；`opencode-go` provider 走 `/inference/go/v1`。匿名通道不需要 console token。
+- 付费路径不受影响：`deepseek-v4.1-flash` 带 key 打 `/zen/v1` 仍 200。
+
+## 与参考实现的关系
+
+- [zhuweiyou/oc2api](https://github.com/zhuweiyou/oc2api) 2.7.x（2026-10-15 04:23 UTC）结论一致：只保留内置 `read`、必须带真实参数 schema。
+- [apmantza/pi-free #614](https://github.com/apmantza/pi-free/pull/614)（2026-10-15 14:10 UTC）方向一致（迁 `/inference/v1`），但它主张 `x-opencode-request` 必须发且用 `msg_` 前缀；**本机 22:35 消融不成立**：同一 body 下不发该头 200、发 `msg_` 形式 403。
+- [6Kmfi6HP/opencode2api](https://github.com/6Kmfi6HP/opencode2api) 最新仍是 10-15 05:40 UTC 的路径迁移，未跟进 22:00 之后的收紧。

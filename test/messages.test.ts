@@ -134,17 +134,19 @@ test('tools pass through and empty tool lists are omitted', () => {
   assert.equal(withoutTools.tools, undefined)
 })
 
-test('ensureFreeLaneShape injects gate tools into toolless chat bodies', () => {
+test('ensureFreeLaneShape injects the real read declaration into toolless chat bodies', () => {
   const payload = { model: 'm', stream: true, messages: [{ role: 'user', content: 'ping' }] }
   const next = ensureFreeLaneShape(payload) as Record<string, unknown>
   assert.notEqual(next, undefined)
   assert.deepEqual(next.messages, payload.messages, 'messages untouched')
-  const tools = next.tools as Array<{ type: string; function: { name: string } }>
-  assert.deepEqual(tools.map((t) => t.function.name).sort(), ['bash', 'read'])
-  assert.equal(next.tool_choice, 'none', 'injected-only stubs are call-disabled')
+  const tools = next.tools as Array<{ type: string; function: { name: string; parameters: { properties: Record<string, unknown>; required?: string[] } } }>
+  assert.deepEqual(tools.map((t) => t.function.name), ['read'])
+  assert.ok(Object.keys(tools[0]!.function.parameters.properties).length > 0, 'gate read carries a real schema')
+  assert.deepEqual(tools[0]!.function.parameters.required, ['filePath'])
+  assert.equal(next.tool_choice, 'none', 'injected-only declaration is call-disabled')
 })
 
-test('ensureFreeLaneShape appends only missing gate tools and keeps tool_choice', () => {
+test('ensureFreeLaneShape appends only the missing read and keeps tool_choice', () => {
   const payload = {
     model: 'm',
     messages: [{ role: 'user', content: 'ping' }],
@@ -153,21 +155,34 @@ test('ensureFreeLaneShape appends only missing gate tools and keeps tool_choice'
   }
   const next = ensureFreeLaneShape(payload) as Record<string, unknown>
   const tools = next.tools as Array<{ type: string; function: { name: string } }>
-  assert.equal(tools.length, 3, 'existing tool kept, both gate tools appended')
-  assert.deepEqual(tools.map((t) => t.function.name).sort(), ['bash', 'read', 'webfetch'])
+  assert.equal(tools.length, 2, 'existing tool kept, read appended')
+  assert.deepEqual(tools.map((t) => t.function.name), ['webfetch', 'read'])
   assert.equal(next.tool_choice, 'auto', 'client choice preserved')
 })
 
+test('ensureFreeLaneShape replaces a schema-less read and never injects bash', () => {
+  const stubbed = {
+    model: 'm',
+    messages: [{ role: 'user', content: 'ping' }],
+    tools: [{ type: 'function', function: { name: 'read', description: 'x', parameters: { type: 'object', properties: {} } } }],
+  }
+  const next = ensureFreeLaneShape(stubbed) as Record<string, unknown>
+  const tools = next.tools as Array<{ function: { name: string; parameters: { properties: Record<string, unknown> } } }>
+  assert.deepEqual(tools.map((t) => t.function.name), ['read'])
+  assert.ok(Object.keys(tools[0]!.function.parameters.properties).length > 0, 'stub replaced by the real schema')
+  assert.equal(tools.some((t) => t.function.name === 'bash'), false, 'bash is never injected')
+})
+
 test('ensureFreeLaneShape leaves satisfying and non-chat payloads untouched', () => {
-  const both = {
+  const satisfying = {
     model: 'm',
     messages: [],
     tools: [
-      { type: 'function', function: { name: 'bash', description: 'x', parameters: {} } },
-      { type: 'function', function: { name: 'read', description: 'x', parameters: {} } },
+      { type: 'function', function: { name: 'bash', description: 'x', parameters: { type: 'object', properties: { command: { type: 'string' } } } } },
+      { type: 'function', function: { name: 'read', description: 'x', parameters: { type: 'object', properties: { filePath: { type: 'string' } } } } },
     ],
   }
-  assert.equal(ensureFreeLaneShape(both), undefined)
+  assert.equal(ensureFreeLaneShape(satisfying), undefined)
   assert.equal(ensureFreeLaneShape({ tools: [] }), undefined, 'no messages = not a chat body')
   assert.equal(ensureFreeLaneShape(null), undefined)
   assert.equal(ensureFreeLaneShape('text'), undefined)
