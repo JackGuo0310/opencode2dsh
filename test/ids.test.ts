@@ -94,7 +94,9 @@ test('disguiseHeaders carries the CLI-identical correlation set', () => {
   assert.equal(headers['x-opencode-session'], ids.session)
   assert.equal(headers['x-session-affinity'], ids.session)
   assert.equal(headers['X-Session-Id'], ids.session)
-  assert.equal(headers['x-opencode-request'], ids.request)
+  // The V2 /inference/v1 gate 403s any request carrying x-opencode-request,
+  // so it must never reach the wire (live-probed 2026-10-15).
+  assert.equal(headers['x-opencode-request'], undefined)
   assert.equal(headers['x-opencode-project'], ids.project)
   assert.ok(headers['user-agent'].startsWith('opencode/'))
   assert.ok(headers['user-agent'].includes(process.platform))

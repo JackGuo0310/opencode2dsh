@@ -177,7 +177,7 @@ test('decodeModelsDev reads the modalities and attachment declarations', () => {
 test('ModelCatalog.inputModalities reads the parsed metadata', async () => {
   const catalog = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': zenBody,
+      'https://opencode.ai/inference/v1/models': zenBody,
       'https://models.dev/api.json': {
         opencode: {
           models: {
@@ -206,7 +206,7 @@ test('ModelCatalog.inputModalities reads the parsed metadata', async () => {
 test('ModelCatalog.reasoningCapability reads the parsed metadata', async () => {
   const catalog = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': zenBody,
+      'https://opencode.ai/inference/v1/models': zenBody,
       'https://models.dev/api.json': {
         opencode: {
           models: {
@@ -260,7 +260,7 @@ test('decodeModelsDev extracts the declared context/output limits', () => {
 test('ModelCatalog.limits speaks only when the metadata declares them', async () => {
   const catalog = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': zenBody,
+      'https://opencode.ai/inference/v1/models': zenBody,
       'https://models.dev/api.json': {
         opencode: {
           models: {
@@ -331,16 +331,16 @@ test('start() fast-retries while the live catalog is empty, then settles into th
 
 test('fetchZenModels sends the anonymous CLI disguise and parses ids', async () => {
   const capture: { url?: string; init?: RequestInit } = {}
-  const ids = await fetchZenModels('https://opencode.ai/zen/', fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody }, capture), opencodeUserAgent())
+  const ids = await fetchZenModels('https://opencode.ai/inference/', fakeFetch({ 'https://opencode.ai/inference/v1/models': zenBody }, capture), opencodeUserAgent())
   assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
-  assert.equal(capture.url, 'https://opencode.ai/zen/v1/models')
+  assert.equal(capture.url, 'https://opencode.ai/inference/v1/models')
   const headers = new Headers(capture.init?.headers)
   assert.equal(headers.get('authorization'), 'Bearer public')
   assert.equal(headers.get('x-opencode-client'), 'cli')
   assert.equal(headers.get('accept-encoding'), 'identity')
   assert.ok(headers.get('user-agent')?.startsWith('opencode/'))
   await assert.rejects(
-    fetchZenModels('https://opencode.ai/zen', fakeFetch({ 'https://opencode.ai/zen/v1/models': { data: [] } }), opencodeUserAgent()),
+    fetchZenModels('https://opencode.ai/inference', fakeFetch({ 'https://opencode.ai/inference/v1/models': { data: [] } }), opencodeUserAgent()),
     /empty list/,
   )
 })
@@ -351,7 +351,7 @@ test('fetchZenModels decodes proxy-compressed model directories', async () => {
     status: 200,
     headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
   })) as typeof fetch
-  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  const ids = await fetchZenModels('https://opencode.ai/inference', fetchImpl, opencodeUserAgent())
   assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
 })
 
@@ -360,7 +360,7 @@ test('fetchZenModels accepts a decoded body with a stale Brotli header', async (
     status: 200,
     headers: { 'content-type': 'application/json', 'content-encoding': 'br' },
   })) as typeof fetch
-  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  const ids = await fetchZenModels('https://opencode.ai/inference', fetchImpl, opencodeUserAgent())
   assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
 })
 
@@ -370,12 +370,12 @@ test('fetchZenModels detects zstd-compressed bodies without relying on headers',
     status: 200,
     headers: { 'content-type': 'application/json' },
   })) as typeof fetch
-  const ids = await fetchZenModels('https://opencode.ai/zen', fetchImpl, opencodeUserAgent())
+  const ids = await fetchZenModels('https://opencode.ai/inference', fetchImpl, opencodeUserAgent())
   assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
 })
 
 test('ModelCatalog intersects the live catalog with free decisions', async () => {
-  const catalog = new ModelCatalog({ fetchImpl: fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody, 'https://models.dev/api.json': metadataBody }) })
+  const catalog = new ModelCatalog({ fetchImpl: fakeFetch({ 'https://opencode.ai/inference/v1/models': zenBody, 'https://models.dev/api.json': metadataBody }) })
   try {
     await catalog.refreshOnce()
     // ghost-free (paid metadata) and legacy-free (deprecated metadata) are both
@@ -410,7 +410,7 @@ test('S3 vouch survives a stale deprecated flag but not a paid verdict', async (
   // while it still works upstream — the S3 vouch remains until Zen delists it.
   const deprecatedFlagged = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': { data: [{ id: 'space-bunny-free' }] },
+      'https://opencode.ai/inference/v1/models': { data: [{ id: 'space-bunny-free' }] },
       'https://models.dev/api.json': {
         opencode: { models: { 'space-bunny-free': { status: 'deprecated', cost: { input: 0, output: 0 } } } },
       },
@@ -428,7 +428,7 @@ test('S3 vouch survives a stale deprecated flag but not a paid verdict', async (
   // model the metadata knows is paid.
   const paidVerdict = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/zen/v1/models': { data: [{ id: 'big-pickle' }] },
+      'https://opencode.ai/inference/v1/models': { data: [{ id: 'big-pickle' }] },
       'https://models.dev/api.json': {
         opencode: { models: { 'big-pickle': { cost: { input: 3, output: 4 } } } },
       },

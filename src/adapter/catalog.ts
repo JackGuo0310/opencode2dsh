@@ -15,7 +15,13 @@ import { opencodeUserAgent } from './ids.ts'
  * /v1/models-equivalent exposure = S1 ∩ S2-allowed (or S3 while S1 is pending).
  */
 
-export const ZEN_BASE_URL = 'https://opencode.ai/zen'
+/**
+ * The anonymous free lane moved to the V2 inference surface on 2026-10-11:
+ * `/zen/v1/*` now answers `403 FreeTierError` for every anonymous request,
+ * while `/inference/v1/*` serves the same free ids with `Bearer public`.
+ * Live-probed 2026-10-15 (docs/zen-free-tier-status.md).
+ */
+export const ZEN_BASE_URL = 'https://opencode.ai/inference'
 
 /** Verified against the anonymous lane with a real chat (agent/internal/catalog/static_models.go). */
 export const staticFreeModels: string[] = [

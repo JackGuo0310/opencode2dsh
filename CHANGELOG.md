@@ -1,12 +1,32 @@
 # Changelog
 
-## Unreleased
+## 1.2.2 (2026-10-15)
 
-### 状态
+### Fixed
 
-- **2026-10-14：Zen 免费通道对非官方客户端全面 403，插件的免 key 匿名路径失效。** 实测换 UA、换会话 ID 编码（含与官方一致的 descending 时间编码）、带或不带 `oc_sk_` key、带或不带 session 头，四条路径全部 `403 FreeTierError`；同一时刻官方 OpenCode 2.0.29 客户端可正常调用免费模型（`TEST_OK`），v1 客户端与两个参考实现同样被拒。
-- 闸门现在只认官方客户端产生并登记过的会话，本仓库 v1.2.0 的 descending 编码修复已不足以通过。
-- 复现数据、判定依据与可行路径见 [docs/zen-free-tier-status.md](docs/zen-free-tier-status.md)。暂不改动代码，等上游变化后再决定是否改造成依赖本机 opencode v2 服务。
+- **恢复 Zen 匿名免费通道。** 免费层自 2026-10-11 起迁到 V2 的 `/inference/v1`，`/zen/v1` 对所有匿名请求一律 `403 FreeTierError`。上游 base URL 从 `https://opencode.ai/zen` 改为 `https://opencode.ai/inference`（`src/adapter/catalog.ts`、`src/config.ts`）。
+- **不再发送 `x-opencode-request`。** 在 V2 门禁上该头存在本身即触发 403——逐项消融实测：同一请求加回它 200→403，去掉它 403→200。`RequestIDs.request` 仍照常派生，只是不再上线（`src/adapter/ids.ts`）。
+- 仍然完全匿名：`Authorization: Bearer public`，无需 key、无需登录、无需安装或运行官方 opencode 客户端。
+
+### 实测矩阵（2026-10-15，本机，匿名）
+
+| 变量 | 结果 |
+| --- | --- |
+| `POST /inference/v1/chat/completions`，合法 descending session，无 `x-opencode-request` | **200** |
+| 同一请求改打 `/zen/v1/chat/completions` | 403 |
+| 加回 `x-opencode-request` | 403 |
+| `x-opencode-project` = `global` / 40 位 hex / 不发 | 均 200（取值无关） |
+| UA 换回旧的 `opencode/1.18.31 ai-sdk/…` | 200（形状不校验） |
+| 完全不带 session 头 | 403 |
+| `stream: false` 或省略 `stream` | 403 |
+| `tools` 只含 `bash`，或只含未知工具名 | 403 |
+| `tools` 含 `read` / `edit` / `glob` / `grep` 任一 | 200 |
+
+`GET /inference/v1/models` 匿名 200，目录与 `/zen/v1/models` 相同。连发 10 次 10/10 成功。
+
+### 更正
+
+- v1.2.1 之后 [docs/zen-free-tier-status.md](docs/zen-free-tier-status.md) 的结论「闸门只认官方登记会话、无解」作废：免费层并未关闭，只是换了路由。参考实现 [6Kmfi6HP/opencode2api 0924584](https://github.com/6Kmfi6HP/opencode2api/commit/0924584b0f9413f5408a82f39f964f9e6b8ea24e) 的路径迁移方向正确，但其「`x-opencode-project` 必须为 `global`」「UA/版本下限必须对齐 v2」两条经实测不成立（取值与形状均无关）。
 
 ## 1.2.1 (2026-10-13)
 

@@ -128,6 +128,13 @@ export function opencodeUserAgent(): string {
 /**
  * The full disguise header set sent with every upstream request
  * (design.md 2.4; gateway.go newUpstreamRequest:640-669).
+ *
+ * `x-opencode-request` is deliberately NOT sent since 2026-10-15: on the V2
+ * `/inference/v1` free-tier gate its mere presence turns a passing request
+ * into `403 FreeTierError`. Ablated live with everything else held fixed —
+ * adding the header back flips a 200 to a 403, removing it flips it back.
+ * `RequestIDs.request` is still derived and exposed for callers that want the
+ * correlation id, it is just not put on the wire.
  */
 export function disguiseHeaders(ids: RequestIDs): Record<string, string> {
   return {
@@ -136,7 +143,6 @@ export function disguiseHeaders(ids: RequestIDs): Record<string, string> {
     'x-opencode-session': ids.session,
     'x-session-affinity': ids.session,
     'X-Session-Id': ids.session,
-    'x-opencode-request': ids.request,
     'x-opencode-project': ids.project,
   }
 }
