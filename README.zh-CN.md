@@ -52,7 +52,7 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 **从 npm 安装**：
 
 ```sh
-dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.2.2
+dsh plugin --profile web add github:JackGuo0310/opencode2dsh#v1.2.3
 ```
 
 **从源码安装**（自行打包）：
