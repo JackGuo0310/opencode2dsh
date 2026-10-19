@@ -58,7 +58,7 @@ const PNG = makePng(320, 240)
 log(`test image: ${PNG.length} bytes, 320x240, valid PNG`)
 
 const catalog = {
-  list: () => ['space-bunny-free'],
+  list: () => ['deepseek-v4.1-flash-free'],
   decision: () => ({ allowed: true, source: 'live' }),
   reasoningCapability: () => ({ reasoning: true, effortValues: [] }),
   inputModalities: () => ['text', 'image', 'video'],
@@ -81,11 +81,11 @@ const adapter = new ZenAdapter(catalog, {
   bodyIdleMs: 60_000,
 })
 
-log(`resolveModel inputModalities: ${JSON.stringify(adapter.resolveModel('opencode2dsh', 'space-bunny-free').inputModalities)}`)
+log(`resolveModel inputModalities: ${JSON.stringify(adapter.resolveModel('opencode2dsh', 'deepseek-v4.1-flash-free').inputModalities)}`)
 
 const stream = adapter.stream({
   provider: 'opencode2dsh',
-  model: 'space-bunny-free',
+  model: 'deepseek-v4.1-flash-free',
   messages: [
     {
       role: 'user',

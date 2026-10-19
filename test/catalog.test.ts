@@ -14,8 +14,11 @@ test('isFreeModel keys on the name', () => {
   assert.ok(!isFreeModel('qwen3-max'))
 })
 
-test('static fallback includes the current Space Bunny model and drops retired MiMo', () => {
-  assert.ok(staticFreeModels.includes('space-bunny-free'))
+test('static fallback tracks the live free list and drops the retired Space Bunny', () => {
+  assert.ok(staticFreeModels.includes('deepseek-v4.1-flash-free'))
+  assert.ok(staticFreeModels.includes('big-pickle'))
+  // space-bunny-free went 410 ModelDeprecated upstream on 2026-10-19
+  assert.ok(!staticFreeModels.includes('space-bunny-free'))
   assert.ok(!staticFreeModels.includes('mimo-v2.5-free'))
 })
 
@@ -410,16 +413,16 @@ test('S3 vouch survives a stale deprecated flag but not a paid verdict', async (
   // while it still works upstream — the S3 vouch remains until Zen delists it.
   const deprecatedFlagged = new ModelCatalog({
     fetchImpl: fakeFetch({
-      'https://opencode.ai/inference/v1/models': { data: [{ id: 'space-bunny-free' }] },
+      'https://opencode.ai/inference/v1/models': { data: [{ id: 'big-pickle' }] },
       'https://models.dev/api.json': {
-        opencode: { models: { 'space-bunny-free': { status: 'deprecated', cost: { input: 0, output: 0 } } } },
+        opencode: { models: { 'big-pickle': { status: 'deprecated', cost: { input: 0, output: 0 } } } },
       },
     }),
   })
   try {
     await deprecatedFlagged.refreshOnce()
-    assert.equal(deprecatedFlagged.decision('space-bunny-free').allowed, true)
-    assert.equal(deprecatedFlagged.decision('space-bunny-free').source, 'static_verified')
+    assert.equal(deprecatedFlagged.decision('big-pickle').allowed, true)
+    assert.equal(deprecatedFlagged.decision('big-pickle').source, 'static_verified')
   } finally {
     deprecatedFlagged.stop()
   }

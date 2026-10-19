@@ -25,19 +25,28 @@ export const ZEN_BASE_URL = 'https://opencode.ai/inference'
 
 /** Verified against the anonymous lane with a real chat (agent/internal/catalog/static_models.go). */
 export const staticFreeModels: string[] = [
-  'big-pickle', // verified 2026-08-28: anonymous chat 200 (non-stream + stream)
-  'space-bunny-free', // verified 2026-09-24: Zen and models.dev list the anonymous free model
-  'ling-3.0-flash-fin-free', // verified 2026-09-01: anonymous chat 200
-  'nemotron-3.5-lightning-free', // verified 2026-09-01: anonymous chat 200
-  'nemotron-3-ultra-free', // verified 2026-09-01: anonymous chat 200 (7s, earlier timeout was transient)
-  'muse-spark-1.2-contributor-free', // verified 2026-09-01: listed free in docs pricing; 403 region-blocked from our probe, region restriction accepted as non-fatal
+  'big-pickle', // verified 2026-10-19: anonymous chat 200
+  'deepseek-v4.1-flash-free', // verified 2026-10-19: anonymous chat 200
+  'minimax-m3.1-flash-free', // verified 2026-10-19: anonymous chat 200 (upstream's replacement for space-bunny-free)
+  'mimo-v2.6-flash-free', // verified 2026-10-19: anonymous chat 200
+  'glm-5.3-flash-free', // verified 2026-10-19: anonymous chat 200
+  'longcat-2.5-preview-free', // verified 2026-10-19: anonymous chat 200
+  'nemotron-3.5-lightning-free', // verified 2026-10-19: anonymous chat 200
+  'nemotron-3.5-super-vl-free', // verified 2026-10-19: anonymous chat 200
+  'nemotron-3-ultra-free', // verified 2026-10-19: anonymous chat 200
 ]
 
-/** Exposed by /v1/models but without a verified anonymous chat yet. */
+/**
+ * Exposed by /v1/models but without a verified anonymous chat yet.
+ *
+ * Retired from the verified list above on 2026-10-19:
+ *  - space-bunny-free           -> 410 ModelDeprecated (replacement: minimax-m3.1-flash-free)
+ *  - ling-3.0-flash-fin-free    -> 400 "Model is unavailable"
+ *  - muse-spark-1.2/1.3-contributor-free -> 403 RegionError (model not available in this country)
+ */
 export const staticFreeCandidates: string[] = [
-  // 'deepseek-v4-flash-free',          // models.dev deprecated; 2026-09-01: upstream 400 "Model is unavailable"
-  // 'laguna-s-2.1-free',                // models.dev deprecated; 2026-09-01: upstream 503 (intermittent, failed twice)
-  // 'hy3-free',                        // models.dev deprecated; 2026-09-01: delisted from /v1/models, upstream 401 "not supported"
+  'beam-free', // 2026-10-19: 403 RegionError from this region
+  'jev-1.13-free', // 2026-10-19: 400 ModelProtocolUnsupported on /chat/completions
 ]
 
 export function isFreeModel(model: string): boolean {

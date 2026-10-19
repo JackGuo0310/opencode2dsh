@@ -12,7 +12,7 @@ const log = (tag: string): void => console.log(`[${Date.now() - t0}ms] ${tag}`)
 
 const adapter = new ZenAdapter(
   {
-    list: () => ['space-bunny-free'],
+    list: () => ['deepseek-v4.1-flash-free'],
     decision: () => ({ allowed: true, source: 'live' }),
     reasoningCapability: () => ({ reasoning: true, effortValues: [] }),
   } as never,
@@ -22,7 +22,7 @@ const adapter = new ZenAdapter(
 async function turn(label: string, reasoningEffort?: string): Promise<{ text: string; kind: string; failure?: string }> {
   const stream = adapter.stream({
     provider: 'opencode2dsh',
-    model: 'space-bunny-free',
+    model: 'deepseek-v4.1-flash-free',
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly one word: OK.' }] }],
     temperature: 0,

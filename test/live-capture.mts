@@ -26,7 +26,7 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
 
 const adapter = new ZenAdapter(
   {
-    list: () => ['space-bunny-free'],
+    list: () => ['deepseek-v4.1-flash-free'],
     decision: () => ({ allowed: true, source: 'live' }),
     reasoningCapability: () => ({ reasoning: true, effortValues: [] }),
   } as never,
@@ -38,7 +38,7 @@ let kind = 'none'
 let failure: string | undefined
 for await (const chunk of adapter.stream({
   provider: 'opencode2dsh',
-  model: 'space-bunny-free',
+  model: 'deepseek-v4.1-flash-free',
   messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly one word: OK.' }] }],
   temperature: 0,
   maxTokens: 128,
