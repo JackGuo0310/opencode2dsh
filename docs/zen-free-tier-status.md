@@ -22,8 +22,29 @@
 | `tools` = 真 `read` + **桩 `bash`**（空 schema） | 403 |
 | `tools` = 真 `read` + 空 schema 的 `webfetch`/`foo`/`todowrite` | 200（未知名字不校验） |
 | `stream: false`，或省略 `stream` | 403 |
+| UA = `opencode/latest/<ver>/cli` | 200 |
+| UA = 旧的 `opencode/1.18.31 (win32 x64; node24.21.0)` 形式 | 403（2026-10-19 起） |
+| UA 版本 < 1.18.0 | `426 UpgradeRequired`（"OpenCode 1.18.0 or newer is required"） |
 
 要点：**门禁认的是"内置 `read` 的真实声明"**，不是"有 read 这个名字"；同时**任何叫 `bash` 的桩声明都是毒药**（旧实现注入的正是 bash+read 双桩，所以 403）。其余未知工具名带空 schema 无所谓。
+
+## UA 形状（2026-10-19 变更）
+
+10-19 晚门禁开始拒绝旧的 UA 形式，只有 CLI v2 自己的写法通过：
+
+- 通过：`opencode/latest/2.0.32/cli`、`opencode/latest/1.18.0/cli`、`opencode/2.0.32/cli`
+- 拒绝：`opencode/1.18.31 (win32 x64; node24.21.0)`（旧适配器写法，带平台/运行时段）→ 403
+- 版本地板：`< 1.18.0` → 426；`>= 1.18.0` 任意版本均可（`9.9.9` 也 200）
+
+适配器现在发 `opencode/latest/${OPENCODE_CLI_VERSION}/cli`（`src/adapter/ids.ts`，常量当前 `2.0.32`）。看到 426 就把它调大。
+
+## 出口 IP 也会被单独拦
+
+同一个请求，直连 200，走被标记的代理出口则 403：
+
+> "OpenCode's free models aren't available from your current network because we've detected abusive traffic from this IP address."
+
+这条与本机代码无关，换出口即可。DSH 侧 Node 会遵循 `NODE_USE_ENV_PROXY=1` + `http_proxy`，所以在有代理的机器上建议把 `opencode.ai` 放进 `NO_PROXY`（实测 `NO_PROXY=…,opencode.ai` 能绕过并返回 200），否则插件会跟着代理出口一起被拒。
 
 `GET /inference/v1/models` 匿名 200，目录不受门禁影响。
 

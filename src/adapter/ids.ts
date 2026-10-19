@@ -131,9 +131,24 @@ export function canonicalSessionID(signal: string): string {
   return `ses_${timePart}${randomPart}`
 }
 
-/** CLI-identical user agent (ids.go opencodeUserAgent, node runtime values). */
+/**
+ * The CLI version the free-tier gate is told about. Upstream enforces a floor
+ * (live-probed 2026-10-19: below 1.18.0 answers `426 UpgradeRequired` with
+ * "OpenCode 1.18.0 or newer is required"), so keep this at or above the floor
+ * and bump it when a `426` shows up.
+ */
+export const OPENCODE_CLI_VERSION = '2.0.32'
+
+/**
+ * CLI-identical user agent.
+ *
+ * The V2 gate stopped accepting the old `opencode/<ver> (<platform> <arch>;
+ * node<ver>)` form on 2026-10-19: that shape 403s while
+ * `opencode/latest/<ver>/cli` (the form the CLI v2 itself sends) returns 200,
+ * everything else held fixed. No platform/runtime segment.
+ */
 export function opencodeUserAgent(): string {
-  return `opencode/1.18.31 (${process.platform} ${process.arch}; node${process.versions.node})`
+  return `opencode/latest/${OPENCODE_CLI_VERSION}/cli`
 }
 
 /**

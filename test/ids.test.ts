@@ -104,5 +104,7 @@ test('disguiseHeaders carries the CLI-identical correlation set', () => {
   assert.equal(headers['x-opencode-request'], undefined)
   assert.equal(headers['x-opencode-project'], ids.project)
   assert.ok(headers['user-agent'].startsWith('opencode/'))
-  assert.ok(headers['user-agent'].includes(process.platform))
+  // Since 2026-10-19 the gate only accepts the CLI v2 UA form: no platform or
+  // runtime segment, version at or above the 1.18.0 floor.
+  assert.match(headers['user-agent'], /^opencode\/latest\/\d+\.\d+\.\d+\/cli$/)
 })
