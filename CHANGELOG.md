@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.4 (2026-10-19)
+
+### Fixed
+
+- **改用 CLI v2 的 User-Agent。** 2026-10-19 晚门禁停止接受旧的 `opencode/<ver> (<platform> <arch>; node<ver>)` 形式（该形式一律 `403 FreeTierError`），只认 `opencode/latest/<ver>/cli`。适配器现在发 `opencode/latest/${OPENCODE_CLI_VERSION}/cli`，常量 `OPENCODE_CLI_VERSION = '2.0.32'`（照本机 CLI v2.0.32 抄的）。版本地板实测为 1.18.0：低于它返回 `426 UpgradeRequired`（"OpenCode 1.18.0 or newer is required to use the free tier"），高于则任意版本都可（`9.9.9` 也 200）。见 `src/adapter/ids.ts`。
+- **刷新静态免费模型兜底清单。** `space-bunny-free` 已被上游废弃（`410 ModelDeprecated`，官方替代 `minimax-m3.1-flash-free`）；`ling-3.0-flash-fin-free`（400 unavailable）、`muse-spark-1.2/1.3-contributor-free`、`beam-free`（403 地区限制）不再可用。清单改为 2026-10-19 逐个实测 200 的九个：`big-pickle`、`deepseek-v4.1-flash-free`、`minimax-m3.1-flash-free`、`mimo-v2.6-flash-free`、`glm-5.3-flash-free`、`longcat-2.5-preview-free`、`nemotron-3.5-lightning-free`、`nemotron-3.5-super-vl-free`、`nemotron-3-ultra-free`（`src/adapter/catalog.ts`）。运行时列表仍由 `GET /inference/v1/models`（每 300 秒）∩ models.dev 免费判定自动跟，静态清单只影响冷启动。
+
+### 注意（与本插件无关的失败模式）
+
+- **出口 IP 会被单独拦。** 被上游标记的代理出口返回 `403`："OpenCode's free models aren't available from your current network because we've detected abusive traffic from this IP address."。本机实测：同一请求直连 200、走被标记的代理出口 403。Node 会跟随 `NODE_USE_ENV_PROXY=1` + `http_proxy`，所以在有代理的机器上建议把 `opencode.ai` 加进 `NO_PROXY`（实测 `NO_PROXY=…,opencode.ai` 可绕过并返回 200）。
+- 依然完全匿名：`Authorization: Bearer public`，不需要 key、不需要账号、不需要安装或运行官方 opencode 客户端（插件不 spawn 任何外部进程）。
+
+### 验证
+
+- `node test/live-capture.mts` → `result: kind=stop text="OK"`（直连与 `NO_PROXY` 绕过代理两种情况）。
+- 单元测试 60 项通过（`test/subscription.test.ts` 硬编码了他人机器路径，非作者机器必然失败，与本次改动无关）。
+- 规则与消融过程记入 [docs/zen-free-tier-status.md](docs/zen-free-tier-status.md)。
+
 ## 1.2.3 (2026-10-15)
 
 ### Fixed
